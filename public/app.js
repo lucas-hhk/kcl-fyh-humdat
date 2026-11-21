@@ -28,6 +28,7 @@ let heroNoteTransition = () => Promise.resolve();
 let welcomeSession;
 let backgroundMusic;
 let roundApplause;
+let gameMusicStopped = false;
 let soundVolume = 0.3;
 try {
   const savedVolume = localStorage.getItem('humdat-volume');
@@ -48,6 +49,7 @@ function setSoundVolume(value) {
 }
 
 function startBackgroundMusic() {
+  if (gameMusicStopped) return;
   if (backgroundMusic && !backgroundMusic.paused) return;
   if (!backgroundMusic) {
     backgroundMusic = new Audio('/background-music.mp3');
@@ -63,7 +65,8 @@ function stopBackgroundMusic() {
 }
 
 function syncBackgroundMusic(phase) {
-  if (phase === 'recording' || phase === 'preparing') stopBackgroundMusic();
+  if (phase !== 'lobby') gameMusicStopped = true;
+  if (gameMusicStopped || phase === 'recording' || phase === 'preparing') stopBackgroundMusic();
   else startBackgroundMusic();
 }
 
@@ -318,6 +321,7 @@ function reset() {
   guessInProgress = false;
   session = undefined;
   state = undefined;
+  gameMusicStopped = false;
   renderedPhase = undefined;
   sessionStorage.removeItem(storageKey);
   history.replaceState(null, '', '/');
@@ -908,6 +912,10 @@ document.addEventListener('click', async (event) => {
       }
     } else {
       control.disabled = true;
+      if (type === 'start' && state.phase === 'lobby') {
+        gameMusicStopped = true;
+        stopBackgroundMusic();
+      }
       try {
         await action(type, { roundId: state.round?.id });
       } finally {
