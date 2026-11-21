@@ -27,13 +27,32 @@ let guessInProgress = false;
 let heroNoteTransition = () => Promise.resolve();
 let welcomeSession;
 let backgroundMusic;
+let roundApplause;
+let soundVolume = 0.3;
+try {
+  const savedVolume = localStorage.getItem('humdat-volume');
+  if (savedVolume !== null && Number.isFinite(Number(savedVolume))) {
+    soundVolume = Math.max(0, Math.min(1, Number(savedVolume)));
+  }
+} catch { /* Use the default volume when storage is unavailable. */ }
+
+function setSoundVolume(value) {
+  soundVolume = Math.max(0, Math.min(1, Number(value)));
+  for (const audio of [backgroundMusic, roundApplause, media?.audio, ...document.querySelectorAll('audio')]) {
+    if (audio) audio.volume = soundVolume;
+  }
+  document.querySelectorAll('[data-volume-slider]').forEach((slider) => {
+    slider.value = String(soundVolume);
+  });
+  try { localStorage.setItem('humdat-volume', String(soundVolume)); } catch { /* Volume still applies for this page. */ }
+}
 
 function startBackgroundMusic() {
   if (backgroundMusic && !backgroundMusic.paused) return;
   if (!backgroundMusic) {
     backgroundMusic = new Audio('/background-music.mp3');
     backgroundMusic.loop = true;
-    backgroundMusic.volume = 0.3;
+    backgroundMusic.volume = soundVolume;
   }
   backgroundMusic.play().catch(() => {});
 }
@@ -41,7 +60,20 @@ function startBackgroundMusic() {
 function stopBackgroundMusic() {
   if (!backgroundMusic) return;
   backgroundMusic.pause();
-  backgroundMusic.currentTime = 0;
+}
+
+function syncBackgroundMusic(phase) {
+  if (phase === 'recording' || phase === 'preparing') stopBackgroundMusic();
+  else startBackgroundMusic();
+}
+
+function playRoundApplause() {
+  if (!roundApplause) {
+    roundApplause = new Audio('/round-applause.mp3');
+    roundApplause.volume = soundVolume;
+  }
+  roundApplause.currentTime = 0;
+  roundApplause.play().catch(() => {});
 }
 
 function tell(message, isError = false) {
@@ -91,6 +123,7 @@ async function action(type, data = {}, current = session) {
 
 function showHome() {
   revealNoteTransition();
+  startBackgroundMusic();
   header.innerHTML = '';
   app.innerHTML = `
     <section class="hero">
@@ -135,6 +168,12 @@ function showWelcome() {
       <div class="wordmark welcome-wordmark"><img class="brand-icon" src="/music-note.svg" alt=""> #humdat</div>
       <button class="button primary welcome-start" type="button" data-welcome-start>Start</button>
     </div>`;
+  const welcomeVolume = document.createElement('div');
+  welcomeVolume.className = 'volume-control welcome-volume';
+  welcomeVolume.setAttribute('role', 'group');
+  welcomeVolume.setAttribute('aria-label', 'Sound volume');
+  welcomeVolume.innerHTML = `<svg class="volume-icon" viewBox="0 0 100 100" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M8 35h30V20h14v60H38V65H8z"/><path fill="currentColor" d="M66 30h10v10h10v20H76v10H66V60h10V40H66zM82 14h10v10h8v52h-8v10H82V76h8V24h-8z"/></svg><input class="volume-slider" data-volume-slider type="range" min="0" max="1" step="0.01" value="${soundVolume}" aria-label="All sound volume" title="All sound volume">`;
+  screen.append(welcomeVolume);
   document.body.append(screen);
   startBackgroundMusic();
 }
@@ -316,17 +355,19 @@ function connect(nextSession) {
 
 function applyState(next, nextSession) {
   if (session !== nextSession || (state && next.revision <= state.revision)) return;
-  const gameStarting = state?.phase === 'lobby' && next.phase !== 'lobby';
   const roundStarted = Boolean(state && ['lobby', 'between'].includes(state.phase)
     && next.phase === 'recording' && state.round?.id !== next.round?.id);
   const sameRound = next.round?.id === state?.round?.id;
   if (!sameRound || next.phase === 'reveal') releaseMedia();
   if (state?.phase === 'recording' && (!sameRound || next.phase !== 'recording')) releaseRecording();
   state = next;
-  if (gameStarting) stopBackgroundMusic();
+  syncBackgroundMusic(next.phase);
   clockOffset = next.serverTime - Date.now();
   renderRoom();
-  if (roundStarted) animateRoundIntro();
+  if (roundStarted) {
+    playRoundApplause();
+    animateRoundIntro();
+  }
 }
 
 function animateRoundIntro() {
@@ -545,6 +586,7 @@ async function loadClue(attempt = 1) {
     clue.url = URL.createObjectURL(blob);
     clue.audio = new Audio(clue.url);
     clue.audio.preload = 'auto';
+    clue.audio.volume = soundVolume;
     try {
       clue.buffer = await new OfflineAudioContext(1, 1, 24000).decodeAudioData(await blob.arrayBuffer());
     } catch {
@@ -866,7 +908,6 @@ document.addEventListener('click', async (event) => {
       }
     } else {
       control.disabled = true;
-      if (type === 'start' && state.phase === 'lobby') stopBackgroundMusic();
       try {
         await action(type, { roundId: state.round?.id });
       } finally {
@@ -878,9 +919,14 @@ document.addEventListener('click', async (event) => {
   }
 });
 
+document.addEventListener('input', (event) => {
+  if (event.target.matches('[data-volume-slider]')) setSoundVolume(event.target.value);
+});
+
 setInterval(tick, 100);
 let saved;
 try { saved = JSON.parse(sessionStorage.getItem(storageKey)); } catch { /* Start at the entry screen. */ }
 if (saved?.token && /^[A-Z2-9]{5}$/.test(saved.code) && (!inviteCode || inviteCode === saved.code)) welcomeSession = saved;
 showHome();
 showWelcome();
+setSoundVolume(soundVolume);
