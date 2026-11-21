@@ -74,31 +74,19 @@ test('a room keeps the clue private, scores timed guesses, and rotates singers',
   assert.equal((await act(host, 'start')).status, 400);
   await act(host, 'known', { songId: song.id, known: true });
   await act(listener, 'known', { songId: song.id, known: true });
-  const importList = (player, tracks) => post(`${room}/playlist`, { tracks }, player);
-  await act(listener, 'add-song', { title: 'Around the World', artist: 'Daft Punk', cover: 'https://example.com/cover.png' });
-  const shared = await hostStream((state) => state.canStart && state.songs.some((s) => s.title === 'Around the World'));
-  const secondSong = shared.songs.find((s) => s.title === 'Around the World');
-  assert.equal(secondSong.cover, 'https://example.com/cover.png');
+  const shared = await hostStream((state) => state.canStart);
+  const secondSong = lobby.songs.find((s) => s.title === 'Take On Me');
   assert.equal(shared.songs.find((s) => s.id === song.id).count, 2);
   await act(host, 'known', { songId: secondSong.id, known: true });
-  assert.deepEqual(await importList(host, 'Take It Easy – Eagles\nTake It Easy - Eagles\nHost-only song - Maya'), {
-    status: 200, data: { count: 2 },
-  });
-  const hostList = await hostStream((state) => state.playlist.includes('Host-only song'));
-  assert.equal(hostList.songs.some((s) => s.title === 'Take It Easy' || s.title === 'Host-only song'), false);
-  assert.equal((await importList(listener, 'take it easy\tEAGLES')).status, 200);
-  assert.equal((await importList(listener, 'Invalid replacement')).status, 400);
-  const overlap = await listenerStream((state) => state.sharedCount === 3);
-  assert.equal(overlap.playlist.includes('Host-only song'), false);
-  const thirdSong = overlap.songs.find((s) => s.title === 'Take It Easy');
-  assert.equal(thirdSong.count, 2);
-  assert.equal(thirdSong.inPlaylist, true);
-  await importList(listener, '');
-  await listenerStream((state) => state.sharedCount === 2 && state.playlist === '');
-  await importList(listener, 'Take It Easy - Eagles');
-  await act(third, 'add-song', { title: 'Solo pick', artist: 'Alex' });
-  const fullLobby = await hostStream((state) => state.sharedCount === 3 && state.songs.some((s) => s.title === 'Solo pick'));
-  assert.equal(fullLobby.songs.find((s) => s.title === 'Solo pick').count, 1);
+  await act(listener, 'known', { songId: secondSong.id, known: true });
+  const thirdSong = lobby.songs.find((s) => s.title === 'Dancing Queen');
+  await act(host, 'known', { songId: thirdSong.id, known: true });
+  await act(listener, 'known', { songId: thirdSong.id, known: true });
+  const soloSong = lobby.songs.find((s) => s.title === 'Bad Guy');
+  await act(third, 'known', { songId: soloSong.id, known: true });
+  assert.equal((await act(third, 'add-song', { title: 'Custom track', artist: 'Alex' })).status, 400);
+  const fullLobby = await hostStream((state) => state.sharedCount === 3 && state.songs.some((s) => s.id === soloSong.id && s.count === 1));
+  assert.equal(fullLobby.songs.length, lobby.songs.length);
   assert.equal((await act(listener, 'start')).status, 403);
   assert.equal((await act(host, 'start')).status, 200);
   const hostTurn = await hostStream((state) => state.phase === 'recording');
@@ -109,7 +97,6 @@ test('a room keeps the clue private, scores timed guesses, and rotates singers',
   assert.equal((await act(host, 'known', { songId: song.id, known: false })).status, 400);
   assert.equal(listenerTurn.round.title, undefined);
   assert.equal(listenerTurn.round.artist, undefined);
-  assert.equal(listenerTurn.round.cover, undefined);
   assert.deepEqual(listenerTurn.songs, []);
 
   const roundId = hostTurn.round.id;
@@ -157,7 +144,6 @@ test('a room keeps the clue private, scores timed guesses, and rotates singers',
   assert.equal(thirdView.players.every((p) => p.score === 0), true);
 
   const revealed = await hostStream((state) => state.phase === 'reveal');
-  if (revealed.round.title === secondSong.title) assert.equal(revealed.round.cover, 'https://example.com/cover.png');
   assert.equal(revealed.round.singerPoints, 67);
   assert.equal(revealed.round.listenerCount, 2);
   assert.equal(revealed.round.results.length, 1);

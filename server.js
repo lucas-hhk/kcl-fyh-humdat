@@ -57,8 +57,8 @@ async function readBody(req, limit) {
   return Buffer.concat(chunks);
 }
 
-async function readJson(req, limit = 4096) {
-  const body = await readBody(req, limit);
+async function readJson(req) {
+  const body = await readBody(req, 4096);
   try {
     const value = JSON.parse(body.toString());
     if (value && typeof value === 'object' && !Array.isArray(value)) return value;
@@ -73,57 +73,14 @@ function sendJson(res, status, value) {
   res.end(JSON.stringify(value));
 }
 
-function addSong(room, title, artist, imported = false) {
-  const song = { id: randomUUID(), title, artist, imported, knownBy: new Set(), playlistBy: new Set() };
+function addSong(room, title, artist) {
+  const song = { id: randomUUID(), title, artist, knownBy: new Set() };
   room.songs.set(song.id, song);
   return song;
 }
 
 function songFamiliarity(room, song) {
-  return [...room.onlineIds].filter((id) => knowsSong(song, id)).length;
-}
-
-function knowsSong(song, playerId) {
-  return song.knownBy.has(playerId) || song.playlistBy.has(playerId);
-}
-
-function songKey(title, artist) {
-  return `${normalize(title)}:${normalize(artist)}`;
-}
-
-function playlistTracks(text) {
-  if (typeof text !== 'string') fail('Paste a track list.');
-  const tracks = new Map();
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  if (lines.length > 100) fail('Paste at most 100 tracks.');
-  for (const [index, line] of lines.entries()) {
-    const divider = /\t+/.exec(line) ?? /\s+[-–—]\s+/.exec(line);
-    if (!divider) fail(`Line ${index + 1} needs a song title and artist separated by a dash or tab.`);
-    const title = field(line.slice(0, divider.index), 80, `Line ${index + 1} title`);
-    const artist = field(line.slice(divider.index + divider[0].length), 80, `Line ${index + 1} artist`);
-    tracks.set(songKey(title, artist), { title, artist });
-  }
-  return tracks;
-}
-
-function replacePlaylist(room, player, tracks) {
-  const songs = new Map([...room.songs.values()].map((song) => [songKey(song.title, song.artist), song]));
-  for (const song of player.playlist) song.playlistBy.delete(player.id);
-  player.playlist = [...tracks].map(([key, { title, artist }]) => {
-    const song = songs.get(key) ?? addSong(room, title, artist, true);
-    song.playlistBy.add(player.id);
-    return song;
-  });
-  for (const song of room.songs.values()) {
-    if (song.imported && !song.knownBy.size && !song.playlistBy.size) room.songs.delete(song.id);
-  }
-}
-
-function coverUrl(value) {
-  if (value == null || value === '') return undefined;
-  const url = typeof value === 'string' && value.length <= 500 ? URL.parse(value) : null;
-  if (url?.protocol !== 'https:' || url.username || url.password) fail('Use an HTTPS image URL for the cover art.');
-  return url.href;
+  return [...song.knownBy].filter((id) => room.onlineIds.has(id)).length;
 }
 
 export function scoreSinger(correctGuesses, listenerCount) {
@@ -142,17 +99,10 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
     const revealed = room.phase === 'reveal';
     const singer = round?.singerId === player.id;
     const guess = round?.correct.get(player.id);
-    const songs = [];
-    if (room.phase === 'lobby') {
-      for (const song of room.songs.values()) {
-        const count = songFamiliarity(room, song);
-        if (song.imported && count < 2) continue;
-        songs.push({
-          id: song.id, title: song.title, artist: song.artist, known: knowsSong(song, player.id),
-          cover: song.cover, inPlaylist: song.playlistBy.has(player.id), count,
-        });
-      }
-    }
+    const songs = room.phase === 'lobby' ? [...room.songs.values()].map((song) => ({
+      id: song.id, title: song.title, artist: song.artist, known: song.knownBy.has(player.id),
+      count: songFamiliarity(room, song),
+    })) : [];
     const sharedCount = songs.filter((song) => song.count >= 2).length;
     return {
       code: room.code,
@@ -165,7 +115,6 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
         id: p.id, name: p.name, score: p.score, online: Boolean(p.stream),
       })),
       songs,
-      playlist: room.phase === 'lobby' ? player.playlist.map((song) => `${song.title}\t${song.artist}`).join('\n') : undefined,
       sharedCount,
       canStart: sharedCount > 0,
       totalRounds: room.roundNumber + room.queue.length,
@@ -178,7 +127,6 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
         singerId: round.singerId,
         title: singer || revealed ? round.song.title : undefined,
         artist: singer || revealed ? round.song.artist : undefined,
-        cover: singer || revealed ? round.song.cover : undefined,
         hasClip: Boolean(round.clip),
         startsAt: round.startsAt,
         endsAt: round.endsAt,
@@ -204,7 +152,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
   function nextMatch(room) {
     if (room.onlineIds.size < 2) return;
     for (const [index, song] of room.queue.entries()) {
-      const singerId = room.singerOrder.find((id) => room.onlineIds.has(id) && knowsSong(song, id));
+      const singerId = room.singerOrder.find((id) => room.onlineIds.has(id) && song.knownBy.has(id));
       if (singerId) return { index, song, singerId };
     }
   }
@@ -260,7 +208,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
     if ([...room.players.values()].some((p) => normalize(p.name) === normalize(name))) {
       fail('That name is already taken in this room.', 409);
     }
-    const player = { id: randomUUID(), name, score: 0, stream: null, playlist: [] };
+    const player = { id: randomUUID(), name, score: 0, stream: null };
     player.formats = Array.isArray(formats) ? formats.filter((f) => typeof f === 'string').slice(0, 2) : [];
     const token = randomBytes(24).toString('hex');
     room.players.set(player.id, player);
@@ -301,7 +249,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
       rooms.set(code, room);
       return sendJson(res, 201, addPlayer(room, name, data.formats));
     }
-    const match = /^\/api\/rooms\/([A-Z2-9]{5})\/(join|events|action|clip|session|playlist)$/.exec(url.pathname);
+    const match = /^\/api\/rooms\/([A-Z2-9]{5})\/(join|events|action|clip|session)$/.exec(url.pathname);
     if (!match) fail('Page not found.', 404);
     const [, code, route] = match;
     const room = rooms.get(code);
@@ -317,13 +265,6 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
       : /^Bearer ([a-f\d]{48})$/.exec(req.headers.authorization ?? '')?.[1];
     const player = room.tokens.get(token);
     if (!player) fail('Your room session has expired.', 401);
-    if (route === 'playlist' && req.method === 'POST') {
-      const { tracks } = await readJson(req, 96000);
-      if (room.phase !== 'lobby' || room.tokens.get(token) !== player) fail('You can edit your track list in the lobby.', 409);
-      replacePlaylist(room, player, playlistTracks(tracks));
-      broadcast(room);
-      return sendJson(res, 200, { count: player.playlist.length });
-    }
     if (req.method === 'GET' && route === 'session') return sendJson(res, 200, snapshot(room, player));
     if (req.method === 'GET' && route === 'events') {
       res.writeHead(200, {
@@ -421,22 +362,6 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
         else song.knownBy.delete(player.id);
         break;
       }
-      case 'add-song': {
-        if (!inPool) fail('You can add songs in the lobby.');
-        const title = field(data.title, 80, 'Title');
-        const artist = field(data.artist, 80, 'Artist');
-        const cover = coverUrl(data.cover);
-        const existing = [...room.songs.values()].find((song) =>
-          songKey(song.title, song.artist) === songKey(title, artist));
-        if ((!existing || existing.imported) && [...room.songs.values()].filter((song) => !song.imported).length >= 80) {
-          fail('The manual song pool is full.');
-        }
-        const song = existing ?? addSong(room, title, artist);
-        song.imported = false;
-        if (cover && !song.cover) song.cover = cover;
-        song.knownBy.add(player.id);
-        break;
-      }
       case 'start': {
         if (!host || !inPool) fail('Only the host can start from the song pool.', 403);
         const queue = [...room.songs.values()].filter((song) => songFamiliarity(room, song) >= 2);
@@ -462,7 +387,6 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
         player.stream = null;
         room.onlineIds.delete(player.id);
         room.tokens.delete(token);
-        replacePlaylist(room, player, new Map());
         stream?.end();
         if (room.phase === 'lobby') {
           room.players.delete(player.id);
