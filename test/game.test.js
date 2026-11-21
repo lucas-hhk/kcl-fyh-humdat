@@ -89,7 +89,20 @@ test('a room keeps the clue private, scores timed guesses, and rotates singers',
     headers: { Authorization: `Bearer ${player.token}`, 'Content-Type': 'audio/webm;codecs=opus' },
   });
   assert.equal((await upload(listener)).status, 409);
-  assert.equal((await upload(host)).status, 200);
+  const segment = (offset, body) => fetch(clipPath + `&offset=${offset}&total=${audio.length}`, {
+    method: 'POST', body, headers: { Authorization: `Bearer ${host.token}`, 'Content-Type': 'audio/webm' },
+  });
+  assert.deepEqual(await (await segment(0, audio.subarray(0, 5))).json(), { received: 5 });
+  assert.deepEqual(await (await segment(0, audio.subarray(0, 5))).json(), { received: 5 });
+  assert.equal((await segment(5, audio.subarray(5))).status, 200);
+  const acknowledged = await (await upload(host)).json();
+  assert.equal(acknowledged.phase, 'preparing');
+  const refreshed = await (await fetch(base + room + '/session', {
+    headers: { Authorization: `Bearer ${listener.token}` },
+  })).json();
+  assert.equal(refreshed.round.hasClip, true);
+  assert.equal(refreshed.round.title, undefined);
+  assert.equal(refreshed.revision, acknowledged.revision);
   const prep = await listenerStream((state) => state.phase === 'preparing');
   assert.equal(prep.round.canGuess, true);
   assert.equal((await fetch(clipPath)).status, 401);
