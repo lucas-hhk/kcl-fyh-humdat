@@ -33,6 +33,24 @@ const starterSongs = [
   ['Watermelon Sugar', 'Harry Styles'],
   ['Somebody That I Used to Know', 'Gotye'],
   ['Take On Me', 'a-ha'],
+  ['Espresso', 'Sabrina Carpenter'],
+  ['Birds of a Feather', 'Billie Eilish'],
+  ['Good Luck, Babe!', 'Chappell Roan'],
+  ['A Bar Song (Tipsy)', 'Shaboozey'],
+  ['Die With a Smile', 'Lady Gaga & Bruno Mars'],
+  ['Taste', 'Sabrina Carpenter'],
+  ["That’s So True", 'Gracie Abrams'],
+  ['APT.', 'ROSÉ & Bruno Mars'],
+  ['Messy', 'Lola Young'],
+  ['Ordinary', 'Alex Warren'],
+  ['Golden', 'HUNTR/X'],
+  ['Too Sweet', 'Hozier'],
+  ['Beautiful Things', 'Benson Boone'],
+  ['greedy', 'Tate McRae'],
+  ['Houdini', 'Dua Lipa'],
+  ["Texas Hold ’Em", 'Beyoncé'],
+  ['I Had Some Help', 'Post Malone & Morgan Wallen'],
+  ['Not Like Us', 'Kendrick Lamar'],
 ];
 const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const maxClipBytes = 2 * 1024 * 1024;
@@ -141,8 +159,8 @@ async function readBody(req, limit) {
   return Buffer.concat(chunks);
 }
 
-async function readJson(req) {
-  const body = await readBody(req, 4096);
+async function readJson(req, limit = 4096) {
+  const body = await readBody(req, limit);
   try {
     const value = JSON.parse(body.toString());
     if (value && typeof value === 'object' && !Array.isArray(value)) return value;
@@ -386,9 +404,9 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
       return res.end(data);
     }
     if (req.method === 'POST' && url.pathname === '/api/music') {
-      const payload = await readJson(req);
-      if (!Array.isArray(payload.songs) || !payload.songs.length || payload.songs.length > 20) {
-        fail('Provide between 1 and 20 songs.');
+      const payload = await readJson(req, 16_384);
+      if (!Array.isArray(payload.songs) || !payload.songs.length || payload.songs.length > 40) {
+        fail('Provide between 1 and 40 songs.');
       }
       const songs = payload.songs.map((song) => ({
         title: field(song?.title, 80, 'Title'),
@@ -540,6 +558,10 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
         else song.knownBy.delete(player.id);
         break;
       }
+      case 'known-all':
+        if (!inPool) fail('You can only choose songs in the lobby.');
+        for (const song of room.songs.values()) song.knownBy.add(player.id);
+        break;
       case 'start': {
         if (!host || !inPool) fail('Only the host can start from the song pool.', 403);
         const queue = [...room.songs.values()].filter((song) => songFamiliarity(room, song) >= 2);

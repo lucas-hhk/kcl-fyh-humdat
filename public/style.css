@@ -148,6 +148,7 @@ input::placeholder { color: var(--muted); opacity: .78; }
 .preview-unavailable, .store-link, .itunes-attribution { color: var(--muted); font-size: .74rem; }
 .store-link { overflow-wrap: anywhere; }
 .itunes-attribution { margin-top: -4px; }
+.pool-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .scoreboard { padding: 20px; }
 .spotify-connect { display: grid; gap: 9px; padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
 .spotify-connect h3 { font-size: 1.35rem; letter-spacing: -.04em; }
@@ -205,6 +206,29 @@ input::placeholder { color: var(--muted); opacity: .78; }
 .recording-timer { color: var(--accent); font-weight: 750; }
 .timer-track { height: 7px; border-radius: 5px; background: var(--raised); overflow: hidden; }
 .timer-track div { width: 100%; height: 100%; background: var(--accent); transform-origin: left; }
+.guessing-stage { overflow: hidden; }
+.guess-vibe {
+  position: relative; display: grid; place-items: center; min-height: 172px; overflow: hidden; border-radius: 16px;
+  background: radial-gradient(circle at 50% 42%, #dceee9 0 17%, #c8dfdb 39%, #aacddc 100%);
+}
+.guess-vibe::before, .guess-vibe::after { content: ''; position: absolute; inset: 12px; border: 1px solid #ffffff8a; border-radius: 50%; }
+.guess-vibe::before { transform: scale(.78); animation: guess-ripple 2.4s ease-out infinite; }
+.guess-vibe::after { transform: scale(.55); animation: guess-ripple 2.4s .8s ease-out infinite; }
+.mystery-disc {
+  position: relative; z-index: 2; display: grid; place-items: center; width: 84px; aspect-ratio: 1; border-radius: 50%;
+  background: repeating-radial-gradient(circle, #263746 0 3px, #3368a0 4px 7px); color: #fff; font-size: 2rem;
+  box-shadow: 0 9px 20px #2637464d, inset 0 0 0 8px #ffffff42; animation: mystery-spin 4s linear infinite;
+}
+.guess-note { position: absolute; z-index: 3; color: var(--accent); font-size: 2.1rem; animation: note-drift 2.9s ease-in-out infinite; }
+.guess-note-one { left: 22%; top: 25%; }.guess-note-two { right: 21%; top: 18%; animation-delay: -.9s; }.guess-note-three { right: 28%; bottom: 15%; animation-delay: -1.7s; }
+.sound-bars { position: absolute; z-index: 3; bottom: 14px; display: flex; align-items: end; gap: 4px; height: 34px; }
+.sound-bars i { display: block; width: 5px; height: 16px; border-radius: 5px; background: var(--accent); animation: sound-bounce .8s ease-in-out infinite alternate; }
+.sound-bars i:nth-child(2n) { height: 28px; animation-delay: -.4s; }.sound-bars i:nth-child(3n) { height: 21px; animation-delay: -.65s; }
+.guess-heading { display: grid; gap: 7px; }
+@keyframes guess-ripple { 0% { opacity: .7; } 100% { opacity: 0; transform: scale(1.2); } }
+@keyframes mystery-spin { to { rotate: 360deg; } }
+@keyframes note-drift { 0%, 100% { translate: 0 5px; rotate: -8deg; } 50% { translate: 0 -9px; rotate: 8deg; } }
+@keyframes sound-bounce { to { transform: scaleY(.35); opacity: .45; } }
 .results { margin: 0; padding-left: 1.3rem; }
 .status {
   position: fixed; z-index: 1; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -247,11 +271,14 @@ input::placeholder { color: var(--muted); opacity: .78; }
   .scoreboard { padding: 16px; }
   .spotify-connect { gap: 10px; }
   .hum-visualizer { min-height: 190px; }
+  .guess-vibe { min-height: 142px; }
+  .pool-actions .button { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   .music-piece { animation: none; }
   .hum-visualizer::after, .hum-visualizer.is-listening .hum-orb { animation: none; }
   .hum-canvas { display: none; }
+  .guess-vibe::before, .guess-vibe::after, .mystery-disc, .guess-note, .sound-bars i { animation: none; }
 }
 
 

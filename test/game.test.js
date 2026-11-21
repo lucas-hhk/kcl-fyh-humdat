@@ -174,4 +174,7 @@ test('a room keeps the clue private, scores timed guesses, and rotates singers',
   assert.equal((await act(host, 'rematch')).status, 200);
   const rematch = await hostStream((state) => state.phase === 'lobby');
   assert.ok(rematch.players.every((player) => player.score === 0));
+  assert.equal((await act(third, 'known-all')).status, 200);
+  const allKnown = await thirdStream((state) => state.phase === 'lobby' && state.songs.every((song) => song.known));
+  assert.equal(allKnown.songs.every((song) => song.known), true);
 });

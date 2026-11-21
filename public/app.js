@@ -560,9 +560,11 @@ function updatePool() {
   const footer = document.querySelector('#pool-footer');
   const message = state.canStart ? `${state.sharedCount} ${state.sharedCount === 1 ? 'round' : 'rounds'} ready to play.`
     : 'Mark some of the same songs as your friends to start.';
-  const footerMarkup = `<p class="muted">${message}</p><p class="itunes-attribution">Artwork and previews provided courtesy of iTunes.</p>${state.you === state.host ? `<div class="row">
-    ${button('Start game', 'start', 'primary', !state.canStart)}
-  </div>` : ''}`;
+  const knowsEverySong = state.songs.every((song) => song.known);
+  const footerMarkup = `<p class="muted">${message}</p><p class="itunes-attribution">Artwork and previews provided courtesy of iTunes.</p><div class="pool-actions">
+    ${button(knowsEverySong ? 'All songs selected' : 'I know every song', 'known-all', 'subtle', knowsEverySong)}
+    ${state.you === state.host ? button('Start game', 'start', 'primary', !state.canStart) : ''}
+  </div>`;
   if (footer.dataset.content !== footerMarkup) {
     footer.dataset.content = footerMarkup;
     footer.innerHTML = footerMarkup;
@@ -596,15 +598,21 @@ function roundView() {
   } else if (phase === 'preparing') {
     contents = `<h2>Get ready to listen</h2><p class="muted">${singer ? 'Your clue is on its way.' : 'The clue is loading. The guessing clock starts for everyone together.'}</p>`;
   } else if (phase === 'guessing') {
-    contents = `<h2>${singer ? 'Your friends are guessing' : '#humdat'}</h2>
+    contents = `<div class="guess-vibe" aria-hidden="true">
+      <span class="guess-note guess-note-one">♪</span><span class="guess-note guess-note-two">♫</span><span class="guess-note guess-note-three">♪</span>
+      <div class="mystery-disc">?</div>
+      <div class="sound-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
+    <div class="guess-heading"><p class="eyebrow">Listen close · guess fast</p><h2>${singer ? 'Your friends are guessing' : 'Name that hum'}</h2>
+      <p class="muted">${singer ? 'Keep an eye on the timer — every second counts for your listeners.' : 'Catch the melody, then type the title before the beat drops.'}</p></div>
       <div class="timer" id="timer" role="timer"></div><div class="timer-track" aria-hidden="true"><div id="timer-bar"></div></div>
       ${round.canGuess ? `<div class="audio-controls">
         <p id="clue-message" class="muted" role="status"></p>
-        ${button('Play clue', 'play-clue', 'subtle', true)}
+        ${button('Play clue again', 'play-clue', 'subtle', true)}
       </div>
       <form class="row" id="guess">
         <input id="guess-title" name="guess" aria-label="Song title" placeholder="Enter song title" maxlength="100" autocomplete="off" required disabled>
-        <button class="button primary" disabled>Guess</button>
+        <button class="button primary" disabled>Lock in guess</button>
       </form><p id="correct" role="status" hidden></p>` : ''}`;
   } else if (phase === 'reveal') {
     contents = `<h2>${escapeHtml(round.title)}</h2><p class="muted">${escapeHtml(round.artist)}</p>
@@ -619,7 +627,7 @@ function roundView() {
       ${you === host ? `<div>${button('Play again', 'rematch', 'primary')}</div>` : ''}`;
   }
   const roleArt = phase === 'recording' ? `<div class="round-role-art"><img class="round-role-icon" src="/${singer ? 'pixel-microphone.svg' : 'pixel-headphones.svg'}" alt="" aria-hidden="true"></div>` : '';
-  return `<section class="panel stage stack${phase === 'recording' ? ' recording-stage' : ''}">
+  return `<section class="panel stage stack${phase === 'recording' ? ' recording-stage' : ''}${phase === 'guessing' ? ' guessing-stage' : ''}">
     <div class="round-stage-copy">${heading}${contents}</div>${roleArt}
   </section>`;
 }
