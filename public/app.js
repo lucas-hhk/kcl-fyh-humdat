@@ -224,10 +224,16 @@ function renderRoom() {
     else stage.innerHTML = roundView();
   }
   const players = [...state.players].sort((a, b) => b.score - a.score);
-  document.querySelector('#scores').innerHTML = `<h3>Players</h3><ol>${players.map((p) => `
+  const spotify = state.phase === 'lobby' ? `<section class="spotify-connect" aria-labelledby="spotify-heading">
+    <p class="eyebrow">Your music</p>
+    <h3 id="spotify-heading">Link Spotify</h3>
+    <p class="muted">Bring your top tracks into a future round. This preview will not access or save anything yet.</p>
+    ${button('Continue with Spotify', 'spotify', 'spotify-button')}
+  </section>` : '';
+  document.querySelector('#scores').innerHTML = `${spotify}<section class="player-list"><h3>Players</h3><ol>${players.map((p) => `
     <li><span>${escapeHtml(p.name)}${p.id === state.you ? ' (you)' : ''}
       ${p.id === state.host || !p.online ? `<small>${[p.id === state.host && 'Host', !p.online && 'Offline'].filter(Boolean).join(' · ')}</small>` : ''}
-    </span><b>${p.score} pts</b></li>`).join('')}</ol>`;
+    </span><b>${p.score} pts</b></li>`).join('')}</ol></section>`;
   if (state.phase === 'lobby') {
     updatePool();
   } else if (state.phase === 'recording') {
@@ -244,6 +250,14 @@ function poolView() {
     <h2>Shared song pool</h2>
     <p class="muted">Tap every song you know. Each song marked by at least two players becomes one round.</p>
   </div>
+  <section class="panel lobby-invite">
+    <div>
+      <p class="eyebrow">Invite friends</p>
+      <strong class="invite-code">${state.code}</strong>
+      <p class="muted">Scan this QR code to join this room.</p>
+    </div>
+    <img class="invite-qr" src="/api/rooms/${state.code}/qr" alt="QR code to join room ${state.code}">
+  </section>
   <section class="panel stack">
     <div class="songs" id="songs" aria-label="Songs"></div>
     <form class="add-form" id="add-song">
@@ -290,6 +304,11 @@ function roundView() {
   if (phase === 'recording') {
     contents = singer ? `
       <h2>${escapeHtml(round.title)}</h2><p class="muted">${escapeHtml(round.artist)} · Hum up to 12 seconds.</p>
+      <div class="hum-visualizer" id="hum-visualizer">
+        <canvas class="hum-canvas" id="hum-canvas" aria-hidden="true"></canvas>
+        <div class="hum-orb" aria-hidden="true"><span>hum</span></div>
+        <p class="hum-caption" id="hum-caption" aria-live="polite">Ready when you are</p>
+      </div>
       <div class="audio-controls" id="recording-controls">
         ${button('Record clue', 'record', 'primary')}
         ${button('Stop and send', 'stop')}
@@ -459,8 +478,90 @@ function releaseRecording() {
   recording = undefined;
   uploadInProgress = false;
   clearTimeout(previous.timer);
+  stopHumVisualizer(previous);
   if (previous.recorder?.state === 'recording') previous.recorder.stop();
   previous.stream?.getTracks().forEach((track) => track.stop());
+}
+
+function stopHumVisualizer(clue) {
+  const visualizer = clue?.visualizer;
+  if (!visualizer) return;
+  cancelAnimationFrame(visualizer.frame);
+  visualizer.source.disconnect();
+  visualizer.analyser.disconnect();
+  visualizer.context.close().catch(() => {});
+  clue.visualizer = undefined;
+}
+
+function startHumVisualizer(stream, clue) {
+  const canvas = document.querySelector('#hum-canvas');
+  const container = document.querySelector('#hum-visualizer');
+  const caption = document.querySelector('#hum-caption');
+  if (!canvas || !container || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  try {
+    const context = new AudioContext();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.82;
+    const source = context.createMediaStreamSource(stream);
+    source.connect(analyser);
+    const spectrum = new Uint8Array(analyser.frequencyBinCount);
+    const visualizer = { context, analyser, source, spectrum, frame: 0, caption: '' };
+    clue.visualizer = visualizer;
+    container.classList.add('is-listening');
+    context.resume().catch(() => {});
+
+    const draw = () => {
+      if (recording !== clue || clue.recorder?.state !== 'recording' || !canvas.isConnected) return;
+      const bounds = canvas.getBoundingClientRect();
+      const scale = Math.min(devicePixelRatio || 1, 2);
+      const width = Math.max(1, Math.round(bounds.width * scale));
+      const height = Math.max(1, Math.round(bounds.height * scale));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      const drawing = canvas.getContext('2d');
+      drawing.setTransform(scale, 0, 0, scale, 0, 0);
+      drawing.clearRect(0, 0, bounds.width, bounds.height);
+      analyser.getByteFrequencyData(spectrum);
+
+      const usable = spectrum.slice(2, 160);
+      const level = usable.reduce((total, value) => total + value, 0) / (usable.length * 255);
+      container.style.setProperty('--hum-level', level.toFixed(3));
+      const nextCaption = level > 0.16 ? 'Your hum is painting the room' : 'Give it a hum…';
+      if (nextCaption !== visualizer.caption) {
+        visualizer.caption = nextCaption;
+        caption.textContent = nextCaption;
+      }
+
+      const centerX = bounds.width / 2;
+      const centerY = bounds.height / 2;
+      const baseRadius = Math.min(bounds.width, bounds.height) * 0.23;
+      const bars = 72;
+      drawing.lineCap = 'round';
+      for (let index = 0; index < bars; index++) {
+        const value = spectrum[3 + Math.floor(index * 1.8)] / 255;
+        const angle = (index / bars) * Math.PI * 2 - Math.PI / 2;
+        const inner = baseRadius + 5;
+        const outer = inner + 8 + value * (50 + level * 48);
+        const hue = 196 + index / bars * 48;
+        drawing.strokeStyle = `hsla(${hue}, 62%, ${47 + value * 22}%, ${0.2 + value * 0.8})`;
+        drawing.lineWidth = 1.5 + value * 3.5;
+        drawing.shadowColor = `hsla(${hue}, 80%, 62%, ${value * 0.75})`;
+        drawing.shadowBlur = 8 + value * 16;
+        drawing.beginPath();
+        drawing.moveTo(centerX + Math.cos(angle) * inner, centerY + Math.sin(angle) * inner);
+        drawing.lineTo(centerX + Math.cos(angle) * outer, centerY + Math.sin(angle) * outer);
+        drawing.stroke();
+      }
+      drawing.shadowBlur = 0;
+      visualizer.frame = requestAnimationFrame(draw);
+    };
+    visualizer.frame = requestAnimationFrame(draw);
+  } catch {
+    // Recording still works when the browser cannot create an analyser.
+  }
 }
 
 function updateRecording() {
@@ -542,6 +643,7 @@ async function startRecording() {
     const chunks = [];
     recorder.ondataavailable = ({ data }) => { if (data.size) chunks.push(data); };
     recorder.onstop = async () => {
+      stopHumVisualizer(next);
       stream.getTracks().forEach((track) => track.stop());
       clearTimeout(next.timer);
       if (recording !== next) return;
@@ -573,6 +675,7 @@ async function startRecording() {
       tell('The recording failed. Try again.', true);
     };
     recorder.start();
+    startHumVisualizer(stream, next);
     next.endsAt = performance.now() + 12_000;
     next.timer = setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, 12_000);
     updateRecording();
@@ -658,6 +761,9 @@ document.addEventListener('click', async (event) => {
         }
       }
       tell(`Share this code with friends: ${session.code}`);
+    } else if (type === 'spotify') {
+      window.open('https://accounts.spotify.com/login', 'spotify-login', 'popup,width=480,height=720,noopener');
+      tell('Spotify sign-in opened. This preview does not access your account yet.');
     } else if (type === 'record') {
       await startRecording();
     } else if (type === 'stop') {

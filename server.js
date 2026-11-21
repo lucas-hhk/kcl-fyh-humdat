@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import QRCode from 'qrcode';
 
 const staticFiles = new Map([
   ['/', ['index.html', 'text/html']],
@@ -33,6 +34,82 @@ const maxClipBytes = 2 * 1024 * 1024;
 const maxPlayersPerRoom = 40;
 const normalize = (value) => value.toLowerCase().normalize('NFKD')
   .replace(/\p{M}/gu, '').replace(/&/g, 'and').replace(/[^\p{L}\p{N}]/gu, '');
+
+function normalizeTitle(value) {
+  return String(value).toLowerCase().normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\s[-–—]\s.*$/u, ' ')
+    .replace(/\bfeat(?:uring)?\.?\s+.*$/u, ' ')
+    .replace(/&/g, 'and')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .replace(/^the\s+/u, '')
+    .replace(/\s+/g, '');
+}
+
+function editDistance(left, right, limit = Infinity) {
+  if (Math.abs(left.length - right.length) > limit) return limit + 1;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row++) {
+    const current = [row];
+    let smallest = current[0];
+    for (let column = 1; column <= right.length; column++) {
+      const cost = left[row - 1] === right[column - 1] ? 0 : 1;
+      const next = Math.min(previous[column] + 1, current[column - 1] + 1, previous[column - 1] + cost);
+      current.push(next);
+      smallest = Math.min(smallest, next);
+    }
+    if (smallest > limit) return limit + 1;
+    previous = current;
+  }
+  return previous[right.length];
+}
+
+function jaroWinklerSimilarity(left, right) {
+  if (left === right) return 1;
+  if (!left || !right) return 0;
+  const matchWindow = Math.max(0, Math.floor(Math.max(left.length, right.length) / 2) - 1);
+  const leftMatches = new Array(left.length).fill(false);
+  const rightMatches = new Array(right.length).fill(false);
+  let matches = 0;
+  for (let index = 0; index < left.length; index++) {
+    const start = Math.max(0, index - matchWindow);
+    const end = Math.min(index + matchWindow + 1, right.length);
+    for (let candidate = start; candidate < end; candidate++) {
+      if (rightMatches[candidate] || left[index] !== right[candidate]) continue;
+      leftMatches[index] = true;
+      rightMatches[candidate] = true;
+      matches++;
+      break;
+    }
+  }
+  if (!matches) return 0;
+  let transpositions = 0;
+  let candidate = 0;
+  for (let index = 0; index < left.length; index++) {
+    if (!leftMatches[index]) continue;
+    while (!rightMatches[candidate]) candidate++;
+    if (left[index] !== right[candidate]) transpositions++;
+    candidate++;
+  }
+  const jaro = (matches / left.length + matches / right.length + (matches - transpositions / 2) / matches) / 3;
+  let prefix = 0;
+  while (prefix < 4 && left[prefix] === right[prefix]) prefix++;
+  return jaro + prefix * 0.1 * (1 - jaro);
+}
+
+export function isCorrectSongGuess(guess, answer) {
+  const submitted = normalizeTitle(guess);
+  const target = normalizeTitle(answer);
+  if (!submitted || !target) return false;
+  if (submitted === target) return true;
+  const shortest = Math.min(submitted.length, target.length);
+  const distance = editDistance(submitted, target, 2);
+  return jaroWinklerSimilarity(submitted, target) >= 0.92
+    || (shortest >= 6 && distance <= 2)
+    || (shortest >= 4 && distance <= 1);
+}
 
 function fail(message, status = 400) {
   throw Object.assign(new Error(message), { status });
@@ -72,6 +149,18 @@ async function readJson(req) {
 function sendJson(res, status, value) {
   res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(value));
+}
+
+function inviteUrl(req, code) {
+  const forwardedHost = req.headers['x-forwarded-host'];
+  const host = (Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost)
+    ?? req.headers.host ?? 'localhost:3000';
+  const forwardedProto = req.headers['x-forwarded-proto'];
+  const protocol = (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto) === 'https'
+    ? 'https' : 'http';
+  const url = new URL('/', `${protocol}://${host}`);
+  url.searchParams.set('room', code);
+  return url.href;
 }
 
 function addSong(room, title, artist) {
@@ -252,11 +341,21 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
       rooms.set(code, room);
       return sendJson(res, 201, addPlayer(room, name, data.formats));
     }
-    const match = /^\/api\/rooms\/([A-Z2-9]{5})\/(join|events|action|clip|session)$/.exec(url.pathname);
+    const match = /^\/api\/rooms\/([A-Z2-9]{5})\/(join|events|action|clip|session|qr)$/.exec(url.pathname);
     if (!match) fail('Page not found.', 404);
     const [, code, route] = match;
     const room = rooms.get(code);
     if (!room) fail('Room not found. Check the code and try again.', 404);
+    if (req.method === 'GET' && route === 'qr') {
+      const svg = await QRCode.toString(inviteUrl(req, code), {
+        type: 'svg', width: 220, margin: 1, errorCorrectionLevel: 'M',
+      });
+      res.writeHead(200, {
+        'Content-Type': 'image/svg+xml',
+        'Cache-Control': 'no-store',
+      });
+      return res.end(svg);
+    }
     if (req.method === 'POST' && route === 'join') {
       const data = await readJson(req);
       const name = field(data.name, 24, 'Name');
@@ -416,7 +515,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
         if (!round.listeners.has(player.id)) fail('Only listeners can guess.', 403);
         if (round.correct.has(player.id)) return sendJson(res, 200, { correct: true });
         const guess = field(data.guess, 100, 'Guess');
-        if (normalize(guess) !== normalize(round.song.title)) {
+        if (!isCorrectSongGuess(guess, round.song.title)) {
           return sendJson(res, 200, { correct: false });
         }
         const points = Math.round(20 + 80 * (round.endsAt - receivedAt) / guessMs);

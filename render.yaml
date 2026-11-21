@@ -4,6 +4,6 @@ services:
     runtime: node
     region: frankfurt
     plan: free
-    buildCommand: node --check server.js
+    buildCommand: npm ci && node --check server.js
     startCommand: npm start
     healthCheckPath: /
