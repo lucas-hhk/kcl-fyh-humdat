@@ -27,6 +27,7 @@ const starterSongs = [
 ];
 const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const maxClipBytes = 2 * 1024 * 1024;
+const maxPlayersPerRoom = 40;
 const normalize = (value) => value.toLowerCase().normalize('NFKD')
   .replace(/\p{M}/gu, '').replace(/&/g, 'and').replace(/[^\p{L}\p{N}]/gu, '');
 
@@ -182,7 +183,9 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 8_000, leadMs =
   }
 
   function addPlayer(room, name) {
-    if (room.players.size >= 10) fail('This room is full.', 409);
+    if (room.players.size >= maxPlayersPerRoom) {
+      fail(`This room is full (maximum ${maxPlayersPerRoom} players).`, 409);
+    }
     if ([...room.players.values()].some((p) => normalize(p.name) === normalize(name))) {
       fail('That name is already taken in this room.', 409);
     }
@@ -422,7 +425,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 8_000, leadMs =
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PORT ?? 3000);
-  createGameServer().listen(port, () => {
+  createGameServer().listen(port, '0.0.0.0', () => {
     console.log(`Humline is running at http://localhost:${port}`);
   });
 }
