@@ -79,6 +79,11 @@ test('a room keeps the clue private, scores timed guesses, and rotates singers',
   await act(third, 'add-song', { title: 'Solo pick', artist: 'Alex' });
   const fullLobby = await hostStream((state) => state.sharedCount === 3 && state.songs.some((s) => s.title === 'Solo pick'));
   assert.equal(fullLobby.songs.find((s) => s.title === 'Solo pick').count, 1);
+  const reference = { section: 'First line of the chorus', melody: [600, 600, 620, 620, 640, 640, 650, 650] };
+  assert.equal((await act(listener, 'reference', { ...reference, songId: song.id })).status, 403);
+  for (const playable of [song, secondSong, thirdSong]) {
+    assert.equal((await act(host, 'reference', { ...reference, songId: playable.id })).status, 200);
+  }
   assert.equal((await act(listener, 'start')).status, 403);
   assert.equal((await act(host, 'start')).status, 200);
   const hostTurn = await hostStream((state) => state.phase === 'recording');
@@ -86,6 +91,8 @@ test('a room keeps the clue private, scores timed guesses, and rotates singers',
   const queuedTitles = new Set([song.title, secondSong.title, thirdSong.title]);
   assert.equal(queuedTitles.delete(hostTurn.round.title), true);
   assert.equal(hostTurn.totalRounds, 3);
+  assert.equal(hostTurn.round.referenceSection, reference.section);
+  assert.equal(listenerTurn.round.referenceSection, undefined);
   assert.equal((await act(host, 'known', { songId: song.id, known: false })).status, 400);
   assert.equal(listenerTurn.round.title, undefined);
   assert.equal(listenerTurn.round.artist, undefined);
@@ -100,7 +107,10 @@ test('a room keeps the clue private, scores timed guesses, and rotates singers',
   });
   assert.equal((await upload(listener)).status, 409);
   const segment = (offset, body) => fetch(clipPath + `&offset=${offset}&total=${audio.length}`, {
-    method: 'POST', body, headers: { Authorization: `Bearer ${host.token}`, 'Content-Type': 'audio/webm' },
+    method: 'POST', body, headers: {
+      Authorization: `Bearer ${host.token}`, 'Content-Type': 'audio/webm',
+      'X-Clue-Melody': JSON.stringify(reference.melody.map((pitch) => pitch + 30)),
+    },
   });
   assert.deepEqual(await (await segment(0, audio.subarray(0, 5))).json(), { received: 5 });
   assert.deepEqual(await (await segment(0, audio.subarray(0, 5))).json(), { received: 5 });
@@ -136,7 +146,8 @@ test('a room keeps the clue private, scores timed guesses, and rotates singers',
   assert.equal(thirdView.players.every((p) => p.score === 0), true);
 
   const revealed = await hostStream((state) => state.phase === 'reveal');
-  assert.equal(revealed.round.singerPoints, 50);
+  assert.equal(revealed.round.melodyPoints, 100);
+  assert.equal(revealed.round.singerPoints, 100);
   assert.equal(revealed.round.results.length, 1);
   assert.equal(revealed.players.find((p) => p.id === scored.you).score, scored.round.earned);
   assert.equal((await act(third, 'guess', { roundId, guess: song.title })).status, 409);

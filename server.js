@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { cleanMelody, scoreMelody } from './public/melody.js';
 
 const staticFiles = new Map([
   ['/', ['index.html', 'text/html']],
@@ -10,6 +11,7 @@ const staticFiles = new Map([
   ['/cat-walking.png', ['cat-walking.png', 'image/png']],
   ['/music-note.svg', ['music-note.svg', 'image/svg+xml']],
   ['/wav.js', ['wav.js', 'text/javascript']],
+  ['/melody.js', ['melody.js', 'text/javascript']],
 ].map(([url, [file, type]]) => [
   url, [readFileSync(new URL(`./public/${file}`, import.meta.url)), type],
 ]));
@@ -93,6 +95,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
     const guess = round?.correct.get(player.id);
     const songs = room.phase === 'lobby' ? [...room.songs.values()].map((song) => ({
       id: song.id, title: song.title, artist: song.artist, known: song.knownBy.has(player.id),
+      referenceSection: song.reference?.section,
       count: songFamiliarity(room, song),
     })) : [];
     const sharedCount = songs.filter((song) => song.count >= 2).length;
@@ -119,6 +122,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
         singerId: round.singerId,
         title: singer || revealed ? round.song.title : undefined,
         artist: singer || revealed ? round.song.artist : undefined,
+        referenceSection: singer ? round.song.reference?.section : undefined,
         hasClip: Boolean(round.clip),
         startsAt: round.startsAt,
         endsAt: round.endsAt,
@@ -128,6 +132,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
         skipped: round.skipped,
         results: revealed ? [...round.correct].map(([id, result]) => ({ id, points: result.points })) : undefined,
         singerPoints: revealed ? round.singerPoints : undefined,
+        melodyPoints: revealed ? round.melodyPoints : undefined,
       },
     };
   }
@@ -176,7 +181,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
     const round = room.round;
     round.skipped = skipped;
     if (!skipped) {
-      round.singerPoints = Math.round(100 * round.correct.size / round.listeners.size);
+      round.singerPoints = round.melodyPoints ?? Math.round(100 * round.correct.size / round.listeners.size);
       room.players.get(round.singerId).score += round.singerPoints;
       for (const [id, result] of round.correct) room.players.get(id).score += result.points;
     }
@@ -331,6 +336,14 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
       for (const id of room.onlineIds) if (id !== player.id) round.listeners.add(id);
       if (!round.listeners.size) fail('Wait for another player to reconnect before sharing.');
       round.clip = clip;
+      if (round.song.reference && typeof req.headers['x-clue-melody'] === 'string') {
+        try {
+          const melody = cleanMelody(JSON.parse(req.headers['x-clue-melody']));
+          round.melodyPoints = scoreMelody(round.song.reference.melody, melody);
+        } catch {
+          // A missing or unreadable contour should not prevent clue delivery.
+        }
+      }
       round.upload = null;
       round.mime = mime;
       room.phase = 'preparing';
@@ -361,6 +374,19 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
           normalize(song.title) === normalize(title) && normalize(song.artist) === normalize(artist));
         if (!existing && room.songs.size >= 80) fail('The song pool is full.');
         (existing ?? addSong(room, title, artist)).knownBy.add(player.id);
+        break;
+      }
+      case 'reference': {
+        if (!host || !inPool) fail('Only the host can set a melody reference in the lobby.', 403);
+        const song = room.songs.get(data.songId);
+        if (!song) fail('Choose a song from the pool.');
+        const section = field(data.section, 80, 'Song section');
+        const melody = cleanMelody(data.melody);
+        const notes = melody?.filter((pitch) => pitch !== null) ?? [];
+        if (!notes.length || Math.max(...notes) - Math.min(...notes) < 15) {
+          fail('Could not detect a melody. Hum several clear notes without background music.');
+        }
+        song.reference = { section, melody };
         break;
       }
       case 'start': {
