@@ -215,12 +215,12 @@ function openRoom(nextSession) {
 }
 
 function renderRoom() {
-  const phaseKey = `${state.phase}:${state.round?.id ?? ''}:${state.you === state.host}`;
+  const phaseKey = `${state.phase}:${state.round?.id ?? ''}:${state.you === state.host}:${state.phase === 'reveal' && state.hasNextRound}`;
   if (phaseKey !== renderedPhase) {
     renderedPhase = phaseKey;
     app.innerHTML = '<div class="room-layout"><div id="room-main" class="room-main"></div><aside id="scores" class="panel scoreboard"></aside></div>';
     const stage = document.querySelector('#room-main');
-    if (state.phase === 'lobby' || state.phase === 'between') stage.innerHTML = poolView();
+    if (state.phase === 'lobby') stage.innerHTML = poolView();
     else stage.innerHTML = roundView();
   }
   const players = [...state.players].sort((a, b) => b.score - a.score);
@@ -228,7 +228,7 @@ function renderRoom() {
     <li><span>${escapeHtml(p.name)}${p.id === state.you ? ' (you)' : ''}
       ${p.id === state.host || !p.online ? `<small>${[p.id === state.host && 'Host', !p.online && 'Offline'].filter(Boolean).join(' · ')}</small>` : ''}
     </span><b>${p.score} pts</b></li>`).join('')}</ol>`;
-  if (state.phase === 'lobby' || state.phase === 'between') {
+  if (state.phase === 'lobby') {
     updatePool();
   } else if (state.phase === 'recording') {
     updateRecording();
@@ -242,7 +242,7 @@ function poolView() {
   return `<div class="room-title">
     <p class="eyebrow">Room ${state.code}</p>
     <h2>Shared song pool</h2>
-    <p class="muted">Tap the songs you know. A clue needs at least two people who know the song.</p>
+    <p class="muted">Tap every song you know. Each song marked by at least two players becomes one round.</p>
   </div>
   <section class="panel stack">
     <div class="songs" id="songs" aria-label="Songs"></div>
@@ -260,9 +260,9 @@ function updatePool() {
   const activeSong = document.activeElement?.dataset.song;
   const songMarkup = state.songs.map((song) => `
     <button type="button" class="song ${song.count >= 2 ? 'shared' : ''}" data-action="known" data-song="${song.id}"
-        aria-pressed="${song.known}" ${song.used ? 'disabled' : ''}>
+        aria-pressed="${song.known}">
       <span class="song-label"><strong>${escapeHtml(song.title)}</strong><span>${escapeHtml(song.artist)}</span></span>
-      <span class="count">${song.used ? 'Played' : `${song.count} know`}</span>
+      <span class="count">${song.count} know</span>
     </button>`).join('');
   if (songs.dataset.content !== songMarkup) {
     songs.dataset.content = songMarkup;
@@ -270,11 +270,10 @@ function updatePool() {
     if (activeSong) [...songs.children].find((el) => el.dataset.song === activeSong)?.focus({ preventScroll: true });
   }
   const footer = document.querySelector('#pool-footer');
-  const message = state.canStart ? (state.you === state.host ? 'There’s a shared song ready.' : 'Waiting for the host to start.')
+  const message = state.canStart ? `${state.sharedCount} ${state.sharedCount === 1 ? 'round' : 'rounds'} ready to play.`
     : 'Mark some of the same songs as your friends to start.';
   const footerMarkup = `<p class="muted">${message}</p>${state.you === state.host ? `<div class="row">
-    ${button(state.phase === 'between' ? 'Start next round' : 'Start game', 'start', 'primary', !state.canStart)}
-    ${state.phase === 'between' ? button('Finish game', 'finish') : ''}
+    ${button('Start game', 'start', 'primary', !state.canStart)}
   </div>` : ''}`;
   if (footer.dataset.content !== footerMarkup) {
     footer.dataset.content = footerMarkup;
@@ -286,7 +285,7 @@ function roundView() {
   const { phase, round, you, host, players } = state;
   const name = (id) => escapeHtml(players.find((p) => p.id === id)?.name ?? 'Player');
   const singer = round?.singerId === you;
-  const heading = `<p class="eyebrow">Room ${state.code}${round ? ` · Round ${round.number}` : ''}</p>`;
+  const heading = `<p class="eyebrow">Room ${state.code}${round ? ` · Round ${round.number} of ${state.totalRounds}` : ''}</p>`;
   let contents;
   if (phase === 'recording') {
     contents = singer ? `
@@ -318,11 +317,12 @@ function roundView() {
     contents = `<h2>${escapeHtml(round.title)}</h2><p class="muted">${escapeHtml(round.artist)}</p>
       ${round.skipped ? '<p>This turn was skipped.</p>' : `<p>${name(round.singerId)} earned <strong>${round.singerPoints} points</strong> for the clue.</p>
       ${round.results.length ? `<ul class="results">${round.results.map((result) => `<li>${name(result.id)} guessed it for <strong>${result.points} points</strong></li>`).join('')}</ul>` : '<p>Nobody guessed this one.</p>'}`}
-      ${you === host ? `<div>${button('Continue', 'next', 'primary')}</div>` : '<p class="muted">Waiting for the host to continue.</p>'}`;
+      ${you === host ? `<div>${button(state.hasNextRound ? 'Next round' : 'Final scores', 'next', 'primary')}</div>` : '<p class="muted">Waiting for the host to continue.</p>'}`;
   } else {
     const highScore = Math.max(...players.map((p) => p.score));
     const winners = players.filter((p) => p.score === highScore);
     contents = `<h2>Game over</h2><p>${winners.map((p) => name(p.id)).join(', ')} ${winners.length === 1 ? 'wins' : 'tie'} with <strong>${highScore} points</strong>.</p>
+      ${state.totalRounds > 0 && state.remainingRounds ? '<p class="muted">Some rounds could not be played with the players still connected.</p>' : ''}
       ${you === host ? `<div>${button('Play again', 'rematch', 'primary')}</div>` : ''}`;
   }
   return `<section class="panel stage stack">${heading}${contents}</section>`;
