@@ -11,7 +11,40 @@
   </head>
   <body>
     <header class="topbar">
-      <div class="wordmark"><span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span> #humdat</div>
+      <div class="brand-lockup">
+        <div class="wordmark"><img class="brand-icon" src="/music-note.svg" alt=""> #humdat</div>
+        <svg class="music-doodle" viewBox="0 0 1000 48" preserveAspectRatio="none" aria-hidden="true" shape-rendering="crispEdges">
+          <g class="staff-lines" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 13H996M4 19H996M4 25H996M4 31H996M4 37H996" />
+          </g>
+          <defs>
+            <g id="pixel-note" fill="currentColor">
+              <path d="M13 4h3v22h-3zM16 4h10v3H16z"/><path d="M0 25h14v7H0zM3 22h11v3H3zM3 32h11v3H3z"/>
+            </g>
+            <g id="pixel-accidental" fill="currentColor">
+              <path d="M3 3h3v30H3zM12 1h3v30h-3zM0 10h18v3H0zM0 22h18v3H0z"/>
+            </g>
+            <g id="pixel-rest" fill="currentColor">
+              <path d="M2 3h17v5H2zM7 8h5v5H7zM12 13h7v5h-7zM7 18h12v5H7zM2 23h5v5H2zM2 28h17v5H2z"/>
+            </g>
+          </defs>
+          <use href="#pixel-note" class="music-piece piece-one" x="38" y="7"/>
+          <use href="#pixel-rest" class="music-piece piece-two" x="98" y="6"/>
+          <use href="#pixel-accidental" class="music-piece piece-accidental" x="164" y="7"/>
+          <use href="#pixel-note" class="music-piece piece-two" x="228" y="9"/>
+          <use href="#pixel-note" class="music-piece piece-one" x="292" y="6"/>
+          <use href="#pixel-accidental" class="music-piece piece-accidental" x="356" y="8"/>
+          <use href="#pixel-rest" class="music-piece piece-two" x="420" y="6"/>
+          <use href="#pixel-note" class="music-piece piece-one" x="484" y="8"/>
+          <use href="#pixel-accidental" class="music-piece piece-accidental" x="548" y="7"/>
+          <use href="#pixel-note" class="music-piece piece-two" x="612" y="6"/>
+          <use href="#pixel-rest" class="music-piece piece-one" x="676" y="7"/>
+          <use href="#pixel-accidental" class="music-piece piece-accidental" x="740" y="8"/>
+          <use href="#pixel-note" class="music-piece piece-two" x="804" y="6"/>
+          <use href="#pixel-note" class="music-piece piece-one" x="868" y="8"/>
+          <use href="#pixel-rest" class="music-piece piece-two" x="932" y="6"/>
+        </svg>
+      </div>
       <div id="header-room"></div>
     </header>
     <main id="app"></main>

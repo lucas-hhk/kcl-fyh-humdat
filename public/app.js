@@ -5,7 +5,6 @@ const header = document.querySelector('#header-room');
 const status = document.querySelector('#status');
 const storageKey = 'humline-room';
 let inviteCode = new URLSearchParams(location.search).get('room')?.toUpperCase() ?? '';
-const wave = '<span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>';
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[char]);
@@ -67,31 +66,75 @@ function showHome() {
     <section class="hero">
       <div>
         <div class="eyebrow">A music party game</div>
-        <h1>hum dat song</h1>
+        <h1 class="hero-title">
+          <span class="hero-title-line"><span data-note-anchor="hum">h</span>um da<span data-note-anchor="dat">t</span></span>
+          <span class="hero-title-line"><span data-note-anchor="song">s</span>on<span data-note-anchor="g">g</span></span>
+          <img class="bouncing-note" src="/music-note.svg" alt="" aria-hidden="true">
+        </h1>
         <p class="lede">Hum songs your friends know. Guess what they’re humming before the clock runs out.</p>
-        <form id="entry" class="panel entry">
-          <div class="stack">
-            <div><label for="name">Your name</label><input id="name" name="name" maxlength="24" placeholder="Enter a nickname" required autocomplete="nickname"></div>
-            ${inviteCode ? '' : '<button class="button primary" name="intent" value="create">Create a room</button>'}
-          </div>
-          <hr class="divider">
-          <label for="room-code">Room code</label>
-          <div class="row">
-            <input id="room-code" name="code" maxlength="5" placeholder="ABCDE" value="${escapeHtml(inviteCode)}" autocomplete="off" spellcheck="false" autocapitalize="characters">
-            <button class="button ${inviteCode ? 'primary' : ''}" name="intent" value="join">Join room</button>
-          </div>
-          ${inviteCode ? '<p style="margin-top: 12px"><a href="/" class="muted">Create your own room</a></p>' : ''}
-        </form>
       </div>
-      <div class="hero-side">
-        <div class="record-art" aria-hidden="true"><div class="record">${wave}</div></div>
-        <div class="how-to">
-          <p><strong>Pick</strong>Mark songs you know.</p>
-          <p><strong>Hum</strong>Record a short clue.</p>
-          <p><strong>Guess</strong>Name it for points.</p>
+      <form id="entry" class="panel entry">
+        <img class="cat-walk" src="/cat-walking.png" alt="" aria-hidden="true">
+        <div class="stack">
+          <div><label for="name">Your name</label><input id="name" name="name" maxlength="24" placeholder="Enter a nickname" required autocomplete="nickname"></div>
+          ${inviteCode ? '' : '<button class="button primary" name="intent" value="create">Create a room</button>'}
         </div>
-      </div>
+        <hr class="divider">
+        <label for="room-code">Room code</label>
+        <div class="row">
+          <input id="room-code" name="code" maxlength="5" placeholder="ABCDE" value="${escapeHtml(inviteCode)}" autocomplete="off" spellcheck="false" autocapitalize="characters">
+          <button class="button ${inviteCode ? 'primary' : ''}" name="intent" value="join">Join room</button>
+        </div>
+        ${inviteCode ? '<p style="margin-top: 12px"><a href="/" class="muted">Create your own room</a></p>' : ''}
+      </form>
     </section>`;
+  animateHeroNote(app.querySelector('.hero-title'));
+}
+
+function animateHeroNote(title) {
+  const note = title.querySelector('.bouncing-note');
+  const anchors = Object.fromEntries([...title.querySelectorAll('[data-note-anchor]')]
+    .map((anchor) => [anchor.dataset.noteAnchor, anchor]));
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const getPosition = (name) => {
+    const titleRect = title.getBoundingClientRect();
+    const anchorRect = anchors[name].getBoundingClientRect();
+    return {
+      x: anchorRect.left - titleRect.left + anchorRect.width / 2 - note.offsetWidth / 2,
+      y: anchorRect.top - titleRect.top - note.offsetHeight + 22,
+    };
+  };
+  const placeAt = (name) => {
+    const { x, y } = getPosition(name);
+    note.style.transform = `translate(${x}px, ${y}px)`;
+  };
+  const moveBetween = async (from, to, duration) => {
+    const start = getPosition(from);
+    const end = getPosition(to);
+    const keyframes = Array.from({ length: 9 }, (_, index) => {
+      const progress = index / 8;
+      const x = start.x + (end.x - start.x) * progress;
+      const y = start.y + (end.y - start.y) * progress - Math.sin(progress * Math.PI * 6) * 8;
+      return { transform: `translate(${x}px, ${y}px)`, offset: progress };
+    });
+    const animation = note.animate(keyframes, { duration, easing: 'linear' });
+    await animation.finished.catch(() => {});
+    note.style.transform = keyframes.at(-1).transform;
+    animation.cancel();
+  };
+
+  placeAt('hum');
+  note.style.opacity = 1;
+  if (reducedMotion) {
+    return;
+  }
+  (async () => {
+    while (title.isConnected) {
+      await moveBetween('hum', 'dat', 3200);
+      if (!title.isConnected) break;
+      await moveBetween('dat', 'hum', 3200);
+    }
+  })();
 }
 
 function reset() {

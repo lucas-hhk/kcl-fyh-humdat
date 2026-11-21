@@ -7,6 +7,8 @@ const staticFiles = new Map([
   ['/', ['index.html', 'text/html']],
   ['/style.css', ['style.css', 'text/css']],
   ['/app.js', ['app.js', 'text/javascript']],
+  ['/cat-walking.png', ['cat-walking.png', 'image/png']],
+  ['/music-note.svg', ['music-note.svg', 'image/svg+xml']],
   ['/wav.js', ['wav.js', 'text/javascript']],
 ].map(([url, [file, type]]) => [
   url, [readFileSync(new URL(`./public/${file}`, import.meta.url)), type],
