@@ -7,6 +7,8 @@ const staticFiles = new Map([
   ['/', ['index.html', 'text/html']],
   ['/style.css', ['style.css', 'text/css']],
   ['/app.js', ['app.js', 'text/javascript']],
+  ['/cat-walking.png', ['cat-walking.png', 'image/png']],
+  ['/music-note.svg', ['music-note.svg', 'image/svg+xml']],
   ['/wav.js', ['wav.js', 'text/javascript']],
 ].map(([url, [file, type]]) => [
   url, [readFileSync(new URL(`./public/${file}`, import.meta.url)), type],
@@ -78,12 +80,16 @@ function addSong(room, title, artist) {
   return song;
 }
 
-function availableSongs(room, singerId) {
-  const connected = new Set([...room.players.values()].filter((p) => p.stream).map((p) => p.id));
-  return [...room.songs.values()]
-    .filter((song) => song.knownBy.has(singerId) && !room.usedSongs.has(song.id))
-    .map((song) => ({ song, count: [...song.knownBy].filter((id) => connected.has(id)).length }))
-    .filter(({ count }) => count >= 2);
+function songFamiliarity(room, song) {
+  return [...song.knownBy].filter((id) => room.onlineIds.has(id)).length;
+}
+
+export function scoreSinger(correctGuesses, listenerCount) {
+  if (!listenerCount) return 0;
+  const fraction = correctGuesses / listenerCount;
+  const target = 0.75;
+  if (fraction <= target) return Math.round(100 * fraction / target);
+  return Math.round(100 - 40 * (fraction - target) / (1 - target));
 }
 
 export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs = 500 } = {}) {
@@ -94,10 +100,11 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
     const revealed = room.phase === 'reveal';
     const singer = round?.singerId === player.id;
     const guess = round?.correct.get(player.id);
-    const waitingForSong = room.phase === 'lobby' || room.phase === 'between';
-    const eligible = waitingForSong
-      ? waitingPlayers(room).filter((p) => availableSongs(room, p.id).length)
-      : [];
+    const songs = room.phase === 'lobby' ? [...room.songs.values()].map((song) => ({
+      id: song.id, title: song.title, artist: song.artist, known: song.knownBy.has(player.id),
+      count: songFamiliarity(room, song),
+    })) : [];
+    const sharedCount = songs.filter((song) => song.count >= 2).length;
     return {
       code: room.code,
       revision: room.revision,
@@ -108,12 +115,12 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
       players: [...room.players.values()].map((p) => ({
         id: p.id, name: p.name, score: p.score, online: Boolean(p.stream),
       })),
-      songs: waitingForSong ? [...room.songs.values()].map((song) => ({
-        id: song.id, title: song.title, artist: song.artist, known: song.knownBy.has(player.id),
-        count: [...song.knownBy].filter((id) => room.onlineIds.has(id)).length,
-        used: room.usedSongs.has(song.id),
-      })) : [],
-      canStart: eligible.length > 0,
+      songs,
+      sharedCount,
+      canStart: sharedCount > 0,
+      totalRounds: room.roundNumber + room.queue.length,
+      remainingRounds: room.queue.length,
+      hasNextRound: Boolean(nextMatch(room)),
       round: round && {
         id: round.id,
         formats: singer ? round.formats : undefined,
@@ -130,6 +137,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
         skipped: round.skipped,
         results: revealed ? [...round.correct].map(([id, result]) => ({ id, points: result.points })) : undefined,
         singerPoints: revealed ? round.singerPoints : undefined,
+        listenerCount: revealed ? round.listeners.size : undefined,
       },
     };
   }
@@ -142,24 +150,33 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
     }
   }
 
-  function waitingPlayers(room) {
-    return [...room.players.values()].filter((p) => p.stream && !room.sung.has(p.id));
+  function nextMatch(room) {
+    if (room.onlineIds.size < 2) return;
+    for (const [index, song] of room.queue.entries()) {
+      const singerId = room.singerOrder.find((id) => room.onlineIds.has(id) && song.knownBy.has(id));
+      if (singerId) return { index, song, singerId };
+    }
   }
 
-  function startRound(room) {
-    const singer = waitingPlayers(room).find((p) => availableSongs(room, p.id).length);
-    if (!singer) fail('Mark a song that at least two connected players know.');
-    const options = availableSongs(room, singer.id);
-    const topCount = Math.max(...options.map(({ count }) => count));
-    const top = options.filter(({ count }) => count === topCount);
+  function advanceRound(room) {
+    const match = nextMatch(room);
+    if (!match) {
+      room.round = null;
+      room.phase = 'finished';
+      return;
+    }
+    const { index, song, singerId } = match;
+    room.queue.splice(index, 1);
+    room.singerOrder.splice(room.singerOrder.indexOf(singerId), 1);
+    room.singerOrder.push(singerId);
     room.phase = 'recording';
     room.roundNumber += 1;
     room.round = {
-      id: randomUUID(), singerId: singer.id, song: top[randomInt(top.length)].song,
+      id: randomUUID(), singerId, song,
       formats: ['audio/webm;codecs=opus', 'audio/mp4;codecs=mp4a.40.2'].filter((type) =>
-        [...room.players.values()].every((p) => p.id === singer.id || p.formats.includes(type))),
+        [...room.players.values()].every((p) => p.id === singerId || p.formats.includes(type))),
       clip: null, mime: null, startsAt: null, endsAt: null, skipped: false,
-      listeners: new Set([...room.onlineIds].filter((id) => id !== singer.id)),
+      listeners: new Set([...room.onlineIds].filter((id) => id !== singerId)),
       ready: new Set(), correct: new Map(), singerPoints: 0,
     };
   }
@@ -169,12 +186,10 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
     const round = room.round;
     round.skipped = skipped;
     if (!skipped) {
-      round.singerPoints = Math.round(100 * round.correct.size / round.listeners.size);
+      round.singerPoints = scoreSinger(round.correct.size, round.listeners.size);
       room.players.get(round.singerId).score += round.singerPoints;
       for (const [id, result] of round.correct) room.players.get(id).score += result.points;
     }
-    room.sung.add(round.singerId);
-    room.usedSongs.add(round.song.id);
     room.phase = 'reveal';
     broadcast(room);
   }
@@ -231,7 +246,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
       const room = {
         code, revision: 0, phase: 'lobby', hostId: null, round: null, roundNumber: 0, timer: null,
         players: new Map(), tokens: new Map(), songs: new Map(), onlineIds: new Set(),
-        sung: new Set(), usedSongs: new Set(), touchedAt: Date.now(),
+        queue: [], singerOrder: [], touchedAt: Date.now(),
       };
       for (const [title, artist] of starterSongs) addSong(room, title, artist);
       rooms.set(code, room);
@@ -339,11 +354,11 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
     const data = await readJson(req);
     const round = room.round;
     const host = player.id === room.hostId;
-    const inPool = room.phase === 'lobby' || room.phase === 'between';
+    const inPool = room.phase === 'lobby';
     switch (data.type) {
       case 'known': {
         const song = room.songs.get(data.songId);
-        if (!inPool || !song || typeof data.known !== 'boolean' || room.usedSongs.has(song.id)) {
+        if (!inPool || !song || typeof data.known !== 'boolean') {
           fail('This song is unavailable.');
         }
         if (data.known) song.knownBy.add(player.id);
@@ -351,20 +366,28 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
         break;
       }
       case 'add-song': {
-        if (!inPool) fail('You can add songs between rounds.');
+        if (!inPool) fail('You can add songs in the lobby.');
         const title = field(data.title, 80, 'Title');
         const artist = field(data.artist, 80, 'Artist');
         const existing = [...room.songs.values()].find((song) =>
           normalize(song.title) === normalize(title) && normalize(song.artist) === normalize(artist));
-        if (existing && room.usedSongs.has(existing.id)) fail('That song has already been played.');
         if (!existing && room.songs.size >= 80) fail('The song pool is full.');
         (existing ?? addSong(room, title, artist)).knownBy.add(player.id);
         break;
       }
-      case 'start':
+      case 'start': {
         if (!host || !inPool) fail('Only the host can start from the song pool.', 403);
-        startRound(room);
+        const queue = [...room.songs.values()].filter((song) => songFamiliarity(room, song) >= 2);
+        if (!queue.length) fail('Mark a song that at least two connected players know.');
+        for (let index = queue.length - 1; index > 0; index--) {
+          const other = randomInt(index + 1);
+          [queue[index], queue[other]] = [queue[other], queue[index]];
+        }
+        room.queue = queue;
+        room.singerOrder = [...room.players.keys()];
+        advanceRound(room);
         break;
+      }
       case 'ready':
         if (room.phase === 'preparing' && round.id === data.roundId && round.listeners.has(player.id)) {
           round.ready.add(player.id);
@@ -409,18 +432,13 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
         return sendJson(res, 200, { ok: true });
       case 'next':
         if (!host || room.phase !== 'reveal' || round.id !== data.roundId) fail('This round is closed.', 409);
-        room.round = null;
-        room.phase = waitingPlayers(room).length ? 'between' : 'finished';
-        break;
-      case 'finish':
-        if (!host || room.phase !== 'between') fail('Finish from the song pool between rounds.', 409);
-        room.phase = 'finished';
+        advanceRound(room);
         break;
       case 'rematch':
         if (!host || room.phase !== 'finished') fail('Only the host can start a rematch.', 403);
         for (const p of room.players.values()) p.score = 0;
-        room.sung.clear();
-        room.usedSongs.clear();
+        room.queue = [];
+        room.singerOrder = [];
         room.roundNumber = 0;
         room.phase = 'lobby';
         break;
@@ -464,6 +482,6 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PORT ?? 3000);
   createGameServer().listen(port, '0.0.0.0', () => {
-    console.log(`Humline is running at http://localhost:${port}`);
+    console.log(`#humdat is running at http://localhost:${port}`);
   });
 }

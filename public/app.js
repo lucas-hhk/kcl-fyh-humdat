@@ -5,7 +5,6 @@ const header = document.querySelector('#header-room');
 const status = document.querySelector('#status');
 const storageKey = 'humline-room';
 let inviteCode = new URLSearchParams(location.search).get('room')?.toUpperCase() ?? '';
-const wave = '<span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>';
 const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[char]);
@@ -67,31 +66,75 @@ function showHome() {
     <section class="hero">
       <div>
         <div class="eyebrow">A music party game</div>
-        <h1>Name<br>that <em>hum.</em></h1>
+        <h1 class="hero-title">
+          <span class="hero-title-line"><span data-note-anchor="hum">h</span>um da<span data-note-anchor="dat">t</span></span>
+          <span class="hero-title-line"><span data-note-anchor="song">s</span>on<span data-note-anchor="g">g</span></span>
+          <img class="bouncing-note" src="/music-note.svg" alt="" aria-hidden="true">
+        </h1>
         <p class="lede">Hum songs your friends know. Guess what they’re humming before the clock runs out.</p>
-        <form id="entry" class="panel entry">
-          <div class="stack">
-            <div><label for="name">Your name</label><input id="name" name="name" maxlength="24" placeholder="Enter a nickname" required autocomplete="nickname"></div>
-            ${inviteCode ? '' : '<button class="button primary" name="intent" value="create">Create a room</button>'}
-          </div>
-          <hr class="divider">
-          <label for="room-code">Room code</label>
-          <div class="row">
-            <input id="room-code" name="code" maxlength="5" placeholder="ABCDE" value="${escapeHtml(inviteCode)}" autocomplete="off" spellcheck="false" autocapitalize="characters">
-            <button class="button ${inviteCode ? 'primary' : ''}" name="intent" value="join">Join room</button>
-          </div>
-          ${inviteCode ? '<p style="margin-top: 12px"><a href="/" class="muted">Create your own room</a></p>' : ''}
-        </form>
       </div>
-      <div class="hero-side">
-        <div class="record-art" aria-hidden="true"><div class="record">${wave}</div></div>
-        <div class="how-to">
-          <p><strong>Pick</strong>Mark songs you know.</p>
-          <p><strong>Hum</strong>Record a short clue.</p>
-          <p><strong>Guess</strong>Name it for points.</p>
+      <form id="entry" class="panel entry">
+        <img class="cat-walk" src="/cat-walking.png" alt="" aria-hidden="true">
+        <div class="stack">
+          <div><label for="name">Your name</label><input id="name" name="name" maxlength="24" placeholder="Enter a nickname" required autocomplete="nickname"></div>
+          ${inviteCode ? '' : '<button class="button primary" name="intent" value="create">Create a room</button>'}
         </div>
-      </div>
+        <hr class="divider">
+        <label for="room-code">Room code</label>
+        <div class="row">
+          <input id="room-code" name="code" maxlength="5" placeholder="ABCDE" value="${escapeHtml(inviteCode)}" autocomplete="off" spellcheck="false" autocapitalize="characters">
+          <button class="button ${inviteCode ? 'primary' : ''}" name="intent" value="join">Join room</button>
+        </div>
+        ${inviteCode ? '<p style="margin-top: 12px"><a href="/" class="muted">Create your own room</a></p>' : ''}
+      </form>
     </section>`;
+  animateHeroNote(app.querySelector('.hero-title'));
+}
+
+function animateHeroNote(title) {
+  const note = title.querySelector('.bouncing-note');
+  const anchors = Object.fromEntries([...title.querySelectorAll('[data-note-anchor]')]
+    .map((anchor) => [anchor.dataset.noteAnchor, anchor]));
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const getPosition = (name) => {
+    const titleRect = title.getBoundingClientRect();
+    const anchorRect = anchors[name].getBoundingClientRect();
+    return {
+      x: anchorRect.left - titleRect.left + anchorRect.width / 2 - note.offsetWidth / 2,
+      y: anchorRect.top - titleRect.top - note.offsetHeight + 22,
+    };
+  };
+  const placeAt = (name) => {
+    const { x, y } = getPosition(name);
+    note.style.transform = `translate(${x}px, ${y}px)`;
+  };
+  const moveBetween = async (from, to, duration) => {
+    const start = getPosition(from);
+    const end = getPosition(to);
+    const keyframes = Array.from({ length: 9 }, (_, index) => {
+      const progress = index / 8;
+      const x = start.x + (end.x - start.x) * progress;
+      const y = start.y + (end.y - start.y) * progress - Math.sin(progress * Math.PI * 6) * 8;
+      return { transform: `translate(${x}px, ${y}px)`, offset: progress };
+    });
+    const animation = note.animate(keyframes, { duration, easing: 'linear' });
+    await animation.finished.catch(() => {});
+    note.style.transform = keyframes.at(-1).transform;
+    animation.cancel();
+  };
+
+  placeAt('hum');
+  note.style.opacity = 1;
+  if (reducedMotion) {
+    return;
+  }
+  (async () => {
+    while (title.isConnected) {
+      await moveBetween('hum', 'dat', 3200);
+      if (!title.isConnected) break;
+      await moveBetween('dat', 'hum', 3200);
+    }
+  })();
 }
 
 function reset() {
@@ -172,12 +215,12 @@ function openRoom(nextSession) {
 }
 
 function renderRoom() {
-  const phaseKey = `${state.phase}:${state.round?.id ?? ''}:${state.you === state.host}`;
+  const phaseKey = `${state.phase}:${state.round?.id ?? ''}:${state.you === state.host}:${state.phase === 'reveal' && state.hasNextRound}`;
   if (phaseKey !== renderedPhase) {
     renderedPhase = phaseKey;
     app.innerHTML = '<div class="room-layout"><div id="room-main" class="room-main"></div><aside id="scores" class="panel scoreboard"></aside></div>';
     const stage = document.querySelector('#room-main');
-    if (state.phase === 'lobby' || state.phase === 'between') stage.innerHTML = poolView();
+    if (state.phase === 'lobby') stage.innerHTML = poolView();
     else stage.innerHTML = roundView();
   }
   const players = [...state.players].sort((a, b) => b.score - a.score);
@@ -185,7 +228,7 @@ function renderRoom() {
     <li><span>${escapeHtml(p.name)}${p.id === state.you ? ' (you)' : ''}
       ${p.id === state.host || !p.online ? `<small>${[p.id === state.host && 'Host', !p.online && 'Offline'].filter(Boolean).join(' · ')}</small>` : ''}
     </span><b>${p.score} pts</b></li>`).join('')}</ol>`;
-  if (state.phase === 'lobby' || state.phase === 'between') {
+  if (state.phase === 'lobby') {
     updatePool();
   } else if (state.phase === 'recording') {
     updateRecording();
@@ -199,7 +242,7 @@ function poolView() {
   return `<div class="room-title">
     <p class="eyebrow">Room ${state.code}</p>
     <h2>Shared song pool</h2>
-    <p class="muted">Tap the songs you know. A clue needs at least two people who know the song.</p>
+    <p class="muted">Tap every song you know. Each song marked by at least two players becomes one round.</p>
   </div>
   <section class="panel stack">
     <div class="songs" id="songs" aria-label="Songs"></div>
@@ -217,9 +260,9 @@ function updatePool() {
   const activeSong = document.activeElement?.dataset.song;
   const songMarkup = state.songs.map((song) => `
     <button type="button" class="song ${song.count >= 2 ? 'shared' : ''}" data-action="known" data-song="${song.id}"
-        aria-pressed="${song.known}" ${song.used ? 'disabled' : ''}>
+        aria-pressed="${song.known}">
       <span class="song-label"><strong>${escapeHtml(song.title)}</strong><span>${escapeHtml(song.artist)}</span></span>
-      <span class="count">${song.used ? 'Played' : `${song.count} know`}</span>
+      <span class="count">${song.count} know</span>
     </button>`).join('');
   if (songs.dataset.content !== songMarkup) {
     songs.dataset.content = songMarkup;
@@ -227,11 +270,10 @@ function updatePool() {
     if (activeSong) [...songs.children].find((el) => el.dataset.song === activeSong)?.focus({ preventScroll: true });
   }
   const footer = document.querySelector('#pool-footer');
-  const message = state.canStart ? (state.you === state.host ? 'There’s a shared song ready.' : 'Waiting for the host to start.')
+  const message = state.canStart ? `${state.sharedCount} ${state.sharedCount === 1 ? 'round' : 'rounds'} ready to play.`
     : 'Mark some of the same songs as your friends to start.';
   const footerMarkup = `<p class="muted">${message}</p>${state.you === state.host ? `<div class="row">
-    ${button(state.phase === 'between' ? 'Start next round' : 'Start game', 'start', 'primary', !state.canStart)}
-    ${state.phase === 'between' ? button('Finish game', 'finish') : ''}
+    ${button('Start game', 'start', 'primary', !state.canStart)}
   </div>` : ''}`;
   if (footer.dataset.content !== footerMarkup) {
     footer.dataset.content = footerMarkup;
@@ -243,7 +285,7 @@ function roundView() {
   const { phase, round, you, host, players } = state;
   const name = (id) => escapeHtml(players.find((p) => p.id === id)?.name ?? 'Player');
   const singer = round?.singerId === you;
-  const heading = `<p class="eyebrow">Room ${state.code}${round ? ` · Round ${round.number}` : ''}</p>`;
+  const heading = `<p class="eyebrow">Room ${state.code}${round ? ` · Round ${round.number} of ${state.totalRounds}` : ''}</p>`;
   let contents;
   if (phase === 'recording') {
     contents = singer ? `
@@ -261,22 +303,26 @@ function roundView() {
   } else if (phase === 'preparing') {
     contents = `<h2>Get ready to listen</h2><p class="muted">${singer ? 'Your clue is on its way.' : 'The clue is loading. The guessing clock starts for everyone together.'}</p>`;
   } else if (phase === 'guessing') {
-    contents = `<h2>${singer ? 'Your friends are guessing' : 'Name that hum'}</h2>
+    contents = `<h2>${singer ? 'Your friends are guessing' : '#humdat'}</h2>
       <div class="timer" id="timer" role="timer"></div><div class="timer-track" aria-hidden="true"><div id="timer-bar"></div></div>
-      ${round.canGuess ? `<p id="clue-message" class="muted"></p>
+      ${round.canGuess ? `<div class="audio-controls">
+        <p id="clue-message" class="muted" role="status"></p>
+        ${button('Play clue', 'play-clue', 'subtle', true)}
+      </div>
       <form class="row" id="guess">
         <input id="guess-title" name="guess" aria-label="Song title" placeholder="Enter song title" maxlength="100" autocomplete="off" required disabled>
         <button class="button primary" disabled>Guess</button>
       </form><p id="correct" role="status" hidden></p>` : ''}`;
   } else if (phase === 'reveal') {
     contents = `<h2>${escapeHtml(round.title)}</h2><p class="muted">${escapeHtml(round.artist)}</p>
-      ${round.skipped ? '<p>This turn was skipped.</p>' : `<p>${name(round.singerId)} earned <strong>${round.singerPoints} points</strong> for the clue.</p>
+      ${round.skipped ? '<p>This turn was skipped.</p>' : `<p>${name(round.singerId)} earned <strong>${round.singerPoints} points</strong>. ${round.results.length} of ${round.listenerCount} listeners guessed correctly.</p>
       ${round.results.length ? `<ul class="results">${round.results.map((result) => `<li>${name(result.id)} guessed it for <strong>${result.points} points</strong></li>`).join('')}</ul>` : '<p>Nobody guessed this one.</p>'}`}
-      ${you === host ? `<div>${button('Continue', 'next', 'primary')}</div>` : '<p class="muted">Waiting for the host to continue.</p>'}`;
+      ${you === host ? `<div>${button(state.hasNextRound ? 'Next round' : 'Final scores', 'next', 'primary')}</div>` : '<p class="muted">Waiting for the host to continue.</p>'}`;
   } else {
     const highScore = Math.max(...players.map((p) => p.score));
     const winners = players.filter((p) => p.score === highScore);
     contents = `<h2>Game over</h2><p>${winners.map((p) => name(p.id)).join(', ')} ${winners.length === 1 ? 'wins' : 'tie'} with <strong>${highScore} points</strong>.</p>
+      ${state.totalRounds > 0 && state.remainingRounds ? '<p class="muted">Some rounds could not be played with the players still connected.</p>' : ''}
       ${you === host ? `<div>${button('Play again', 'rematch', 'primary')}</div>` : ''}`;
   }
   return `<section class="panel stage stack">${heading}${contents}</section>`;
@@ -287,10 +333,18 @@ function releaseMedia() {
   media.controller.abort();
   media.source?.stop();
   media.source?.disconnect();
+  media.audio?.pause();
+  if (media.url) URL.revokeObjectURL(media.url);
   media = undefined;
 }
 
 function enableSound() {
+  try {
+    // On iOS, the default ambient category follows the phone's silent switch.
+    if (navigator.audioSession) navigator.audioSession.type = 'playback';
+  } catch {
+    // The native player remains available.
+  }
   try {
     playbackContext ??= new AudioContext();
     if (playbackContext.state !== 'running') playbackContext.resume().then(tick).catch(() => {});
@@ -310,13 +364,21 @@ async function loadClue(attempt = 1) {
     const response = await roomRequest(`clip?round=${roundId}`, {
       signal: clue.controller.signal,
     }, current);
-    const bytes = await response.arrayBuffer();
-    const buffer = await new OfflineAudioContext(1, 1, 24000).decodeAudioData(bytes);
+    const blob = await response.blob();
     if (media !== clue || session !== current) return;
-    clue.buffer = buffer;
+    clue.url = URL.createObjectURL(blob);
+    clue.audio = new Audio(clue.url);
+    clue.audio.preload = 'auto';
+    try {
+      clue.buffer = await new OfflineAudioContext(1, 1, 24000).decodeAudioData(await blob.arrayBuffer());
+    } catch {
+      // Some browsers can play the recording in a media element even when Web Audio cannot decode it.
+    }
+    if (media !== clue || session !== current) return;
+    clue.loaded = true;
     if (state.phase === 'preparing') await action('ready', { roundId }, current);
   } catch {
-    if (media === clue && !clue.buffer) {
+    if (media === clue && !clue.loaded) {
       clue.error = true;
       if (attempt < 3) setTimeout(() => {
         if (media !== clue) return;
@@ -326,6 +388,24 @@ async function loadClue(attempt = 1) {
     }
   } finally {
     clearTimeout(timeout);
+  }
+  tick();
+}
+
+async function playClue() {
+  const clue = media;
+  if (!clue?.loaded) return;
+  clue.useNative = true;
+  clue.source?.stop();
+  clue.source = null;
+  try {
+    clue.audio.currentTime = 0;
+    await clue.audio.play();
+    if (media === clue) clue.playError = false;
+  } catch {
+    if (media !== clue) return;
+    clue.playError = true;
+    clue.useNative = false;
   }
   tick();
 }
@@ -354,16 +434,22 @@ function tick() {
   correct.hidden = !round.correct;
   if (round.correct) correct.textContent = `Correct! You earned ${round.earned} points.`;
   const playing = playbackContext?.state === 'running';
-  const message = media?.error ? 'Could not load the clue.' : !media?.buffer ? 'Loading clue…'
-    : !playing ? 'Tap anywhere to restore sound.' : '';
-  document.querySelector('#clue-message').textContent = message;
-  if (remaining && playing && media?.buffer && !media.source) {
+  const message = media?.error ? 'Could not load the clue.' : !media?.loaded ? 'Loading clue…'
+    : media.playError ? 'Could not play the clue. Tap Play clue to try again.'
+    : !media.useNative && (!playing || !media.buffer) ? 'Tap Play clue to hear the recording.' : '';
+  const clueMessage = document.querySelector('#clue-message');
+  if (clueMessage.textContent !== message) clueMessage.textContent = message;
+  document.querySelector('[data-action="play-clue"]').disabled = !started || !remaining || !media?.loaded;
+  if (remaining && playing && media?.buffer && !media.source && !media.useNative) {
     const source = playbackContext.createBufferSource();
     source.buffer = media.buffer;
     source.connect(playbackContext.destination);
     media.source = source;
     source.onended = () => source.disconnect();
     source.start(playbackContext.currentTime + Math.max(0, round.startsAt - now) / 1000);
+  } else if (started && remaining && media?.loaded && !media.buffer && !media.nativeAttempted && !media.useNative) {
+    media.nativeAttempted = true;
+    playClue();
   }
 }
 
@@ -576,6 +662,8 @@ document.addEventListener('click', async (event) => {
       await startRecording();
     } else if (type === 'stop') {
       if (recording?.recorder?.state === 'recording') recording.recorder.stop();
+    } else if (type === 'play-clue') {
+      await playClue();
     } else if (type === 'retry-send') {
       await sendRecording();
     } else if (type === 'known') {
