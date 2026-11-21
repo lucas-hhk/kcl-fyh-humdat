@@ -67,7 +67,7 @@ function showHome() {
     <section class="hero">
       <div>
         <div class="eyebrow">A music party game</div>
-        <h1>Name<br>that <em>hum.</em></h1>
+        <h1>hum dat song</h1>
         <p class="lede">Hum songs your friends know. Guess what they’re humming before the clock runs out.</p>
         <form id="entry" class="panel entry">
           <div class="stack">
@@ -261,7 +261,7 @@ function roundView() {
   } else if (phase === 'preparing') {
     contents = `<h2>Get ready to listen</h2><p class="muted">${singer ? 'Your clue is on its way.' : 'The clue is loading. The guessing clock starts for everyone together.'}</p>`;
   } else if (phase === 'guessing') {
-    contents = `<h2>${singer ? 'Your friends are guessing' : 'Name that hum'}</h2>
+    contents = `<h2>${singer ? 'Your friends are guessing' : '#humdat'}</h2>
       <div class="timer" id="timer" role="timer"></div><div class="timer-track" aria-hidden="true"><div id="timer-bar"></div></div>
       ${round.canGuess ? `<p id="clue-message" class="muted"></p>
       <form class="row" id="guess">

@@ -461,6 +461,6 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PORT ?? 3000);
   createGameServer().listen(port, () => {
-    console.log(`Humline is running at http://localhost:${port}`);
+    console.log(`#humdat is running at http://localhost:${port}`);
   });
 }

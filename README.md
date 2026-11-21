@@ -1,6 +1,6 @@
-# Humline
+# #humdat
 
-Humline is a room-code party game. Players mark songs they know, take turns recording a hummed clue, and race to name the song.
+#humdat is a room-code party game. Players mark songs they know, take turns recording a hummed clue, and race to name the song.
 
 ## Run locally
 
