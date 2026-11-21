@@ -634,13 +634,18 @@ function releaseMedia() {
   media = undefined;
 }
 
-function enableSound() {
+function setAudioSessionType(type) {
   try {
-    // On iOS, the default ambient category follows the phone's silent switch.
-    if (navigator.audioSession) navigator.audioSession.type = 'playback';
+    const audioSession = navigator.audioSession;
+    if (audioSession && audioSession.type !== type) audioSession.type = type;
   } catch {
-    // The native player remains available.
+    // Browsers without audio session control manage it automatically.
   }
+}
+
+function enableSound() {
+  // Playback bypasses silent mode on iOS but cannot be used during microphone capture.
+  if (!recording?.capturing) setAudioSessionType('playback');
   try {
     playbackContext ??= new AudioContext();
     if (playbackContext.state !== 'running') playbackContext.resume().then(tick).catch(() => {});
@@ -790,7 +795,14 @@ function releaseRecording() {
   clearTimeout(previous.timer);
   stopHumVisualizer(previous);
   if (previous.recorder?.state === 'recording') previous.recorder.stop();
-  previous.stream?.getTracks().forEach((track) => track.stop());
+  stopCapture(previous);
+}
+
+function stopCapture(clue) {
+  clue.stream?.getTracks().forEach((track) => track.stop());
+  clue.stream = undefined;
+  clue.capturing = false;
+  if (!recording?.capturing) setAudioSessionType('playback');
 }
 
 function stopHumVisualizer(clue) {
@@ -935,10 +947,11 @@ async function startRecording() {
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
     throw new Error('Recording needs a supported browser using HTTPS or localhost.');
   }
-  const next = {};
+  const next = { capturing: true };
   recording = next;
   updateRecording();
   try {
+    setAudioSessionType('play-and-record');
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     if (recording !== next) {
       stream.getTracks().forEach((track) => track.stop());
@@ -954,7 +967,7 @@ async function startRecording() {
     recorder.ondataavailable = ({ data }) => { if (data.size) chunks.push(data); };
     recorder.onstop = async () => {
       stopHumVisualizer(next);
-      stream.getTracks().forEach((track) => track.stop());
+      stopCapture(next);
       clearTimeout(next.timer);
       if (recording !== next) return;
       next.sendingMessage = 'Preparing clue…';
