@@ -11,7 +11,7 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; color: var(--ink); background: #f0f0f0; min-height: 100dvh; }
-button, input { font: inherit; }
+button, input, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { opacity: .5; cursor: default; }
 [hidden] { display: none !important; }
@@ -59,7 +59,7 @@ h3 { font-size: 1.06rem; }
 .entry .primary { width: 100%; }
 .divider { display: block; border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
 label { display: block; font-size: .9rem; font-weight: 700; margin-bottom: 6px; }
-input {
+input, textarea {
   width: 100%; min-width: 0; min-height: 46px; padding: 9px 12px; background: var(--bg);
   color: var(--ink); border: 1px solid var(--border); border-radius: 10px;
 }
@@ -99,6 +99,12 @@ input::placeholder { color: var(--muted); opacity: .78; }
 }
 .shared .count { background: var(--raised); color: var(--ink); font-weight: 750; }
 .add-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+.cover-field { grid-column: 1 / -1; }
+#playlist-tracks { resize: vertical; }
+.song-cover, .round-cover { aspect-ratio: 1; border-radius: 8px; object-fit: cover; }
+.song-cover { width: 40px; height: 40px; flex: none; }
+.round-cover { width: 112px; height: 112px; }
+.count small { display: block; }
 .scoreboard { padding: 20px; }
 .scoreboard ol { padding: 0; margin: 14px 0 0; list-style: none; display: grid; gap: 8px; }
 .scoreboard li {

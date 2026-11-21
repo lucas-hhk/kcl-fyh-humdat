@@ -246,13 +246,28 @@ function poolView() {
   </div>
   <section class="panel stack">
     <div class="songs" id="songs" aria-label="Songs"></div>
+    <details>
+      <summary>Import my track list</summary>
+      <form class="stack" id="import-playlist">
+        <p class="muted" id="playlist-help">Paste up to 100 tracks, one per line, as Song title – Artist. Saving replaces your previous list. Save an empty list to clear it.</p>
+        <label for="playlist-tracks">My tracks</label>
+        <textarea id="playlist-tracks" name="tracks" aria-describedby="playlist-help" maxlength="17000" rows="5" placeholder="Dancing Queen – ABBA">${escapeHtml(state.playlist ?? '')}</textarea>
+        <div><button class="button" type="submit">Save track list</button></div>
+        <p id="playlist-status" class="muted" role="status" hidden></p>
+      </form>
+    </details>
     <form class="add-form" id="add-song">
       <div><label for="song-title">Song title</label><input id="song-title" name="title" maxlength="80" placeholder="Add a favourite" required></div>
       <div><label for="song-artist">Artist</label><input id="song-artist" name="artist" maxlength="80" placeholder="Artist name" required></div>
       <button class="button" type="submit">Add song</button>
+      <div class="cover-field"><label for="song-cover">Cover art URL (optional)</label><input type="url" id="song-cover" name="cover" maxlength="500" placeholder="https://"></div>
     </form>
     <div id="pool-footer" class="stack"></div>
   </section>`;
+}
+
+function coverArt(url, style) {
+  return url ? `<img class="${style}" src="${escapeHtml(url)}" alt="" width="112" height="112" loading="lazy" referrerpolicy="no-referrer">` : '';
 }
 
 function updatePool() {
@@ -260,9 +275,10 @@ function updatePool() {
   const activeSong = document.activeElement?.dataset.song;
   const songMarkup = state.songs.map((song) => `
     <button type="button" class="song ${song.count >= 2 ? 'shared' : ''}" data-action="known" data-song="${song.id}"
-        aria-pressed="${song.known}">
+        aria-pressed="${song.known}" ${song.inPlaylist ? 'disabled' : ''}>
+      ${coverArt(song.cover, 'song-cover')}
       <span class="song-label"><strong>${escapeHtml(song.title)}</strong><span>${escapeHtml(song.artist)}</span></span>
-      <span class="count">${song.count} know</span>
+      <span class="count">${song.count} know${song.inPlaylist ? '<small>In your list</small>' : ''}</span>
     </button>`).join('');
   if (songs.dataset.content !== songMarkup) {
     songs.dataset.content = songMarkup;
@@ -289,6 +305,7 @@ function roundView() {
   let contents;
   if (phase === 'recording') {
     contents = singer ? `
+      ${coverArt(round.cover, 'round-cover')}
       <h2>${escapeHtml(round.title)}</h2><p class="muted">${escapeHtml(round.artist)} · Hum up to 12 seconds.</p>
       <div class="audio-controls" id="recording-controls">
         ${button('Record clue', 'record', 'primary')}
@@ -314,7 +331,7 @@ function roundView() {
         <button class="button primary" disabled>Guess</button>
       </form><p id="correct" role="status" hidden></p>` : ''}`;
   } else if (phase === 'reveal') {
-    contents = `<h2>${escapeHtml(round.title)}</h2><p class="muted">${escapeHtml(round.artist)}</p>
+    contents = `${coverArt(round.cover, 'round-cover')}<h2>${escapeHtml(round.title)}</h2><p class="muted">${escapeHtml(round.artist)}</p>
       ${round.skipped ? '<p>This turn was skipped.</p>' : `<p>${name(round.singerId)} earned <strong>${round.singerPoints} points</strong>. ${round.results.length} of ${round.listenerCount} listeners guessed correctly.</p>
       ${round.results.length ? `<ul class="results">${round.results.map((result) => `<li>${name(result.id)} guessed it for <strong>${result.points} points</strong></li>`).join('')}</ul>` : '<p>Nobody guessed this one.</p>'}`}
       ${you === host ? `<div>${button(state.hasNextRound ? 'Next round' : 'Final scores', 'next', 'primary')}</div>` : '<p class="muted">Waiting for the host to continue.</p>'}`;
@@ -610,8 +627,17 @@ document.addEventListener('submit', async (event) => {
       });
       openRoom(await response.json());
     } else if (form.id === 'add-song') {
-      await action('add-song', { title: data.get('title'), artist: data.get('artist') });
+      await action('add-song', { title: data.get('title'), artist: data.get('artist'), cover: data.get('cover') });
       form.reset();
+    } else if (form.id === 'import-playlist') {
+      const response = await roomRequest('playlist', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tracks: data.get('tracks') }),
+      });
+      const { count } = await response.json();
+      const status = form.querySelector('#playlist-status');
+      status.textContent = count ? `Saved ${count} ${count === 1 ? 'track' : 'tracks'}.` : 'Track list cleared.';
+      status.hidden = false;
     } else if (form.id === 'guess') {
       if (guessInProgress) return;
       guessInProgress = true;
@@ -685,6 +711,10 @@ document.addEventListener('click', async (event) => {
     tell(error.message, true);
   }
 });
+
+document.addEventListener('error', (event) => {
+  if (event.target.matches?.('.song-cover, .round-cover')) event.target.hidden = true;
+}, true);
 
 setInterval(tick, 100);
 let saved;

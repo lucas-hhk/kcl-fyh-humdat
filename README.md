@@ -15,7 +15,7 @@ For play on separate devices, serve the same running Node process behind HTTPS a
 ## Play a game
 
 1. Create a room and share the code or invite link. Two to ten people can play.
-2. Each player marks songs they know or adds favourites by title and artist. Every song marked by at least two connected players goes into the game.
+2. Each player marks songs they know, adds favourites by title and artist, or pastes a track list. Write one song per line as `Song title – Artist` or use a tab between title and artist. Saving replaces your previous list. Every song known by at least two connected players goes into the game, including matches across pasted lists and manual marks. You can attach an HTTPS image URL for cover art you have permission to share.
 3. The host starts the game. The singer privately sees a song and records up to 12 seconds. Stopping the recording sends the clue automatically.
 4. The clue plays automatically when the shared 20-second guessing timer starts. Correct guesses earn 20–100 points based on speed. The singer earns 0 points if nobody guesses, 100 if exactly three quarters of listeners guess, and 60 if everyone guesses. Scores between those marks are proportional and rounded.
 5. After each reveal, the host advances to the next queued song. Singers rotate among players who know the song. Once the queue ends, the host can show the final scores and start a rematch.
