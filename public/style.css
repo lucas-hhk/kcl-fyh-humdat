@@ -2,6 +2,7 @@
   color-scheme: light;
   font: 16px/1.5 "Cooper Black", "Cooper Std Black", serif;
   --bg: #FFFFFF;
+  --page-bg: #f0f0f0;
   --surface: #F2EFE7;
   --raised: #C8DFDB;
   --border: #C8DFDB;
@@ -10,7 +11,7 @@
   --accent: #3368A0;
 }
 * { box-sizing: border-box; }
-body { margin: 0; color: var(--ink); background: #f0f0f0; min-height: 100dvh; }
+body { margin: 0; color: var(--ink); background: var(--page-bg); min-height: 100dvh; }
 button, input { font: inherit; }
 button { cursor: pointer; }
 button:disabled { opacity: .5; cursor: default; }
@@ -21,6 +22,15 @@ button:disabled { opacity: .5; cursor: default; }
   min-height: 76px; padding: 0 5vw; display: flex; align-items: center; justify-content: space-between;
   gap: 12px; border-bottom: 1px solid var(--border);
 }
+.welcome-active .topbar { visibility: hidden; }
+.welcome-screen {
+  position: fixed; inset: 0; z-index: 2147483000; display: grid; place-items: center;
+  overflow: hidden; background: #AACDDC;
+}
+.welcome-content { display: grid; justify-items: center; gap: clamp(48px, 9vh, 88px); }
+.welcome-wordmark { font-size: clamp(12rem, 32vw, 32rem); letter-spacing: -.075em; }
+.welcome-wordmark .brand-icon { width: .86em; height: 1.3em; margin-right: .24em; }
+.welcome-start { min-width: 240px; min-height: 72px; padding: 18px 52px; border-radius: 16px; font-size: 1.75rem; }
 .brand-lockup { display: flex; align-items: center; gap: 24px; min-width: 0; flex: 1; }
 .wordmark { display: flex; align-items: center; font-weight: 850; font-size: 1.6rem; letter-spacing: -.075em; white-space: nowrap; }
 .brand-icon { display: block; width: 28px; height: 44px; object-fit: contain; margin-right: 10px; flex: none; }
@@ -43,6 +53,14 @@ main { max-width: 1190px; padding: clamp(24px, 5vw, 70px) 24px; margin: 0 auto; 
 .bouncing-note {
   position: absolute; top: 0; left: 0; z-index: 1; width: 30px; height: 46px;
   object-fit: contain; opacity: 0; pointer-events: none; image-rendering: pixelated;
+}
+.note-transition-overlay {
+  position: fixed; inset: 0; z-index: 2147483647; overflow: hidden; background: var(--page-bg);
+  clip-path: circle(0 at 50% 50%); pointer-events: all;
+}
+.note-transition-note {
+  position: absolute; display: block; object-fit: contain; image-rendering: pixelated;
+  transform-origin: center; will-change: transform;
 }
 .hero h1 em { color: var(--accent); font-style: normal; }
 h1, h2, h3, p { margin: 0; }
@@ -109,6 +127,13 @@ input::placeholder { color: var(--muted); opacity: .78; }
 .scoreboard b { color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .stage { min-height: 290px; align-content: start; gap: 18px; }
 .stage h2 { font-size: clamp(2.1rem, 7vw, 3.7rem); }
+.recording-stage { grid-template-columns: minmax(0, 1fr) minmax(170px, .55fr); align-items: center; }
+.round-stage-copy { display: grid; min-width: 0; gap: 18px; }
+.round-role-art { display: grid; place-items: center; min-height: 260px; }
+.round-role-icon { display: block; width: min(100%, 220px); height: 240px; object-fit: contain; image-rendering: pixelated; }
+.round-role-icon.is-intro-hidden { opacity: 0; }
+.round-intro-overlay { position: fixed; inset: 0; z-index: 2147483001; overflow: hidden; pointer-events: none; }
+.round-intro-icon { position: absolute; display: block; object-fit: contain; image-rendering: pixelated; will-change: left, top, width, height; }
 .stage audio { width: 100%; max-width: 420px; }
 .audio-controls { display: grid; gap: 13px; justify-items: start; }
 .timer { font-size: 2.65rem; font-weight: 850; font-variant-numeric: tabular-nums; line-height: 1; color: var(--accent); }
@@ -125,12 +150,19 @@ input::placeholder { color: var(--muted); opacity: .78; }
 .status.error { border-color: var(--accent); }
 @media (max-width: 800px) {
   .hero, .room-layout { grid-template-columns: 1fr; }
+  .recording-stage { grid-template-columns: 1fr; }
+  .round-role-art { min-height: 180px; }
+  .round-role-icon { width: min(100%, 180px); height: 190px; }
+  .welcome-wordmark { font-size: clamp(8rem, 20vw, 12rem); }
 }
 @media (max-width: 460px) {
   main { padding: 22px 14px; }
   .topbar { padding-inline: 14px; }
   .brand-lockup { gap: 12px; }
   .music-doodle { height: 38px; }
+  .welcome-wordmark { font-size: clamp(4.5rem, 18vw, 6rem); }
+  .welcome-wordmark .brand-icon { width: .86em; height: 1.3em; }
+  .welcome-start { min-width: 210px; min-height: 64px; font-size: 1.5rem; }
   .header-actions .button { padding-inline: 9px; }
   .songs { grid-template-columns: 1fr; }
 }

@@ -7,7 +7,10 @@ const staticFiles = new Map([
   ['/', ['index.html', 'text/html']],
   ['/style.css', ['style.css', 'text/css']],
   ['/app.js', ['app.js', 'text/javascript']],
+  ['/background-music.mp3', ['background-music.mp3', 'audio/mpeg']],
   ['/cat-walking.png', ['cat-walking.png', 'image/png']],
+  ['/pixel-microphone.svg', ['pixel-microphone.svg', 'image/svg+xml']],
+  ['/pixel-headphones.svg', ['pixel-headphones.svg', 'image/svg+xml']],
   ['/music-note.svg', ['music-note.svg', 'image/svg+xml']],
   ['/wav.js', ['wav.js', 'text/javascript']],
 ].map(([url, [file, type]]) => [
@@ -229,7 +232,8 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
     const url = new URL(req.url, 'http://localhost');
     if (req.method === 'GET' && staticFiles.has(url.pathname)) {
       const [data, type] = staticFiles.get(url.pathname);
-      res.writeHead(200, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-cache' });
+      const charset = type.startsWith('text/') || type.includes('javascript') || type.endsWith('svg+xml') ? '; charset=utf-8' : '';
+      res.writeHead(200, { 'Content-Type': `${type}${charset}`, 'Cache-Control': 'no-cache' });
       return res.end(data);
     }
     if (req.method === 'POST' && url.pathname === '/api/rooms') {
