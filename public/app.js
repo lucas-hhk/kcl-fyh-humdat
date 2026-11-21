@@ -1,5 +1,4 @@
 import { encodeWav } from './wav.js';
-import { trackMelody } from './melody.js';
 
 const app = document.querySelector('#app');
 const header = document.querySelector('#header-room');
@@ -186,7 +185,6 @@ function applyState(next, nextSession) {
   if (session !== nextSession || (state && next.revision <= state.revision)) return;
   const sameRound = next.round?.id === state?.round?.id;
   if (!sameRound || next.phase === 'reveal') releaseMedia();
-  if (recording?.reference && (next.phase !== 'lobby' || next.you !== next.host)) releaseRecording();
   if (state?.phase === 'recording' && (!sameRound || next.phase !== 'recording')) releaseRecording();
   state = next;
   clockOffset = next.serverTime - Date.now();
@@ -253,17 +251,6 @@ function poolView() {
       <div><label for="song-artist">Artist</label><input id="song-artist" name="artist" maxlength="80" placeholder="Artist name" required></div>
       <button class="button" type="submit">Add song</button>
     </form>
-    ${state.you === state.host ? `<details>
-      <summary>Add a melody reference</summary>
-      <form id="reference-form" class="stack">
-        <p class="muted">Hum the melody yourself or choose a clip of it up to 12 seconds long. Use a single voice or instrument. The singer will get the name of the section.</p>
-        <div><label for="reference-song">Song</label><select id="reference-song" name="song" required></select></div>
-        <div><label for="reference-section">Section to hum</label><input id="reference-section" name="section" placeholder="First line of the chorus" maxlength="80" required></div>
-        <div><label for="reference-audio">Reference audio (optional)</label><input id="reference-audio" name="audio" type="file" accept="audio/*"></div>
-        <div class="row"><button class="button" type="submit">Add reference</button>${button('Stop and save', 'stop-reference')}</div>
-        <p id="reference-status" class="muted" role="status"></p>
-      </form>
-    </details>` : ''}
     <div id="pool-footer" class="stack"></div>
   </section>`;
 }
@@ -274,7 +261,7 @@ function updatePool() {
   const songMarkup = state.songs.map((song) => `
     <button type="button" class="song ${song.count >= 2 ? 'shared' : ''}" data-action="known" data-song="${song.id}"
         aria-pressed="${song.known}">
-      <span class="song-label"><strong>${escapeHtml(song.title)}</strong><span>${escapeHtml(song.artist)}${song.referenceSection ? ' · Melody reference ready' : ''}</span></span>
+      <span class="song-label"><strong>${escapeHtml(song.title)}</strong><span>${escapeHtml(song.artist)}</span></span>
       <span class="count">${song.count} know</span>
     </button>`).join('');
   if (songs.dataset.content !== songMarkup) {
@@ -292,18 +279,6 @@ function updatePool() {
     footer.dataset.content = footerMarkup;
     footer.innerHTML = footerMarkup;
   }
-  const select = document.querySelector('#reference-song');
-  if (select) {
-    const options = state.songs.map((song) =>
-      `<option value="${song.id}">${escapeHtml(song.title)} – ${escapeHtml(song.artist)}</option>`).join('');
-    if (select.dataset.content !== options) {
-      const selected = select.value;
-      select.dataset.content = options;
-      select.innerHTML = options;
-      if (state.songs.some((song) => song.id === selected)) select.value = selected;
-    }
-    updateRecording();
-  }
 }
 
 function roundView() {
@@ -315,7 +290,6 @@ function roundView() {
   if (phase === 'recording') {
     contents = singer ? `
       <h2>${escapeHtml(round.title)}</h2><p class="muted">${escapeHtml(round.artist)} · Hum up to 12 seconds.</p>
-      ${round.referenceSection ? `<p>Hum this section for your melody score. <strong>${escapeHtml(round.referenceSection)}</strong></p>` : ''}
       <div class="audio-controls" id="recording-controls">
         ${button('Record clue', 'record', 'primary')}
         ${button('Stop and send', 'stop')}
@@ -341,7 +315,7 @@ function roundView() {
       </form><p id="correct" role="status" hidden></p>` : ''}`;
   } else if (phase === 'reveal') {
     contents = `<h2>${escapeHtml(round.title)}</h2><p class="muted">${escapeHtml(round.artist)}</p>
-      ${round.skipped ? '<p>This turn was skipped.</p>' : `<p>${name(round.singerId)} earned <strong>${round.singerPoints} points</strong> ${round.melodyPoints == null ? 'based on correct guesses' : 'for melody accuracy'}.</p>
+      ${round.skipped ? '<p>This turn was skipped.</p>' : `<p>${name(round.singerId)} earned <strong>${round.singerPoints} points</strong>. ${round.results.length} of ${round.listenerCount} listeners guessed correctly.</p>
       ${round.results.length ? `<ul class="results">${round.results.map((result) => `<li>${name(result.id)} guessed it for <strong>${result.points} points</strong></li>`).join('')}</ul>` : '<p>Nobody guessed this one.</p>'}`}
       ${you === host ? `<div>${button(state.hasNextRound ? 'Next round' : 'Final scores', 'next', 'primary')}</div>` : '<p class="muted">Waiting for the host to continue.</p>'}`;
   } else {
@@ -437,7 +411,6 @@ async function playClue() {
 }
 
 function tick() {
-  if (recording?.reference && recording.recorder?.state === 'recording') updateRecording();
   if (state?.phase === 'recording') {
     const timer = document.querySelector('#recording-timer');
     if (timer && recording?.recorder?.state === 'recording') {
@@ -491,20 +464,6 @@ function releaseRecording() {
 }
 
 function updateRecording() {
-  const referenceForm = document.querySelector('#reference-form');
-  if (referenceForm) {
-    const active = recording?.recorder?.state === 'recording';
-    referenceForm.querySelector('[type="submit"]').disabled = Boolean(recording);
-    referenceForm.querySelector('[data-action="stop-reference"]').hidden = !active;
-    referenceForm.querySelector('select').disabled = Boolean(recording);
-    for (const input of referenceForm.querySelectorAll('input')) input.disabled = Boolean(recording);
-    const status = referenceForm.querySelector('#reference-status');
-    const message = active ? `${Math.max(0, Math.ceil((recording.endsAt - performance.now()) / 1000))} seconds left`
-      : recording?.sendingMessage ?? '';
-    if (status.textContent !== message) status.textContent = message;
-    const start = document.querySelector('[data-action="start"]');
-    if (start) start.disabled = Boolean(recording) || !state.canStart;
-  }
   const controls = document.querySelector('#recording-controls');
   if (!controls) return;
   const active = recording?.recorder?.state === 'recording';
@@ -535,10 +494,8 @@ async function sendRecording() {
       clue.sendingMessage = `Sending clue… ${Math.floor(100 * offset / bytes.byteLength)}%`;
       updateRecording();
       try {
-        const headers = { 'Content-Type': clue.blob.type };
-        if (end === bytes.byteLength && clue.melody) headers['X-Clue-Melody'] = JSON.stringify(clue.melody);
         const response = await roomRequest(path, {
-          method: 'POST', headers, body: bytes.slice(offset, end),
+          method: 'POST', headers: { 'Content-Type': clue.blob.type }, body: bytes.slice(offset, end),
           signal: AbortSignal.timeout(12000),
         }, current);
         const result = await response.json();
@@ -562,17 +519,12 @@ async function sendRecording() {
   }
 }
 
-async function saveReference(reference, decoded) {
-  await action('reference', { ...reference, melody: trackMelody(decoded) });
-  tell('Melody reference saved.');
-}
-
-async function startRecording(reference) {
+async function startRecording() {
   if (recording) return;
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
     throw new Error('Recording needs a supported browser using HTTPS or localhost.');
   }
-  const next = { reference };
+  const next = {};
   recording = next;
   updateRecording();
   try {
@@ -582,8 +534,7 @@ async function startRecording(reference) {
       return;
     }
     next.stream = stream;
-    const sharedFormat = state.round?.formats?.find((type) => MediaRecorder.isTypeSupported(type));
-    const needsMelody = reference || state.round?.referenceSection;
+    const sharedFormat = state.round.formats?.find((type) => MediaRecorder.isTypeSupported(type));
     const mimeType = sharedFormat ?? ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus']
       .find((type) => MediaRecorder.isTypeSupported(type));
     const recorder = new MediaRecorder(stream, { ...(mimeType && { mimeType }), audioBitsPerSecond: 24000 });
@@ -594,34 +545,24 @@ async function startRecording(reference) {
       stream.getTracks().forEach((track) => track.stop());
       clearTimeout(next.timer);
       if (recording !== next) return;
-      next.sendingMessage = reference ? 'Checking the melody…' : 'Preparing clue…';
+      next.sendingMessage = 'Preparing clue…';
       updateRecording();
       const original = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type });
       try {
         if (!original.size) throw new Error('The recording was empty. Try again.');
-        let decoded;
-        if (!sharedFormat || needsMelody) {
-          try {
-            const decoder = new OfflineAudioContext(1, 1, 24000);
-            decoded = await decoder.decodeAudioData(await original.arrayBuffer());
-          } catch (error) {
-            if (!sharedFormat) throw error;
-          }
-        }
-        if (recording !== next) return;
-        if (reference) {
-          await saveReference(reference, decoded);
-          if (recording !== next) return;
-          releaseRecording();
+        if (sharedFormat) {
+          next.blob = original;
         } else {
-          if (decoded && needsMelody) next.melody = trackMelody(decoded);
-          next.blob = sharedFormat ? original : encodeWav(decoded);
-          await sendRecording();
+          const decoder = new OfflineAudioContext(1, 1, 24000);
+          const decoded = await decoder.decodeAudioData(await original.arrayBuffer());
+          if (recording !== next) return;
+          next.blob = encodeWav(decoded);
         }
+        await sendRecording();
       } catch (error) {
         if (recording !== next) return;
         releaseRecording();
-        tell(reference || !original.size ? error.message : 'Could not prepare this recording for playback. Try again.', true);
+        tell(original.size ? 'Could not prepare this recording for playback. Try again.' : error.message, true);
       }
       updateRecording();
     };
@@ -671,24 +612,6 @@ document.addEventListener('submit', async (event) => {
     } else if (form.id === 'add-song') {
       await action('add-song', { title: data.get('title'), artist: data.get('artist') });
       form.reset();
-    } else if (form.id === 'reference-form') {
-      const reference = { songId: data.get('song'), section: data.get('section') };
-      const audio = data.get('audio');
-      if (audio.size) {
-        if (audio.size > 10 * 1024 * 1024) throw new Error('Choose a reference clip smaller than 10 MB.');
-        const pending = { reference, sendingMessage: 'Checking the melody…' };
-        recording = pending;
-        updateRecording();
-        try {
-          const decoded = await new OfflineAudioContext(1, 1, 24000).decodeAudioData(await audio.arrayBuffer());
-          if (decoded.duration > 12) throw new Error('Choose a reference clip no longer than 12 seconds.');
-          if (recording === pending) await saveReference(reference, decoded);
-        } finally {
-          if (recording === pending) releaseRecording();
-        }
-      } else {
-        await startRecording(reference);
-      }
     } else if (form.id === 'guess') {
       if (guessInProgress) return;
       guessInProgress = true;
@@ -701,8 +624,7 @@ document.addEventListener('submit', async (event) => {
   } catch (error) {
     tell(error.message, true);
   } finally {
-    if (form.id === 'reference-form') updateRecording();
-    else submitter.disabled = false;
+    submitter.disabled = false;
     if (form.id === 'guess') {
       guessInProgress = false;
       tick();
@@ -738,7 +660,7 @@ document.addEventListener('click', async (event) => {
       tell(`Share this code with friends: ${session.code}`);
     } else if (type === 'record') {
       await startRecording();
-    } else if (type === 'stop' || type === 'stop-reference') {
+    } else if (type === 'stop') {
       if (recording?.recorder?.state === 'recording') recording.recorder.stop();
     } else if (type === 'play-clue') {
       await playClue();
