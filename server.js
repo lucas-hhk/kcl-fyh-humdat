@@ -37,6 +37,7 @@ const starterSongs = [
 const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const maxClipBytes = 2 * 1024 * 1024;
 const maxPlayersPerRoom = 40;
+const musicMetadataCache = new Map();
 const normalize = (value) => value.toLowerCase().normalize('NFKD')
   .replace(/\p{M}/gu, '').replace(/&/g, 'and').replace(/[^\p{L}\p{N}]/gu, '');
 
@@ -154,6 +155,60 @@ async function readJson(req) {
 function sendJson(res, status, value) {
   res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(value));
+}
+
+function musicKey(title, artist) {
+  return `${normalizeTitle(title)}\u0000${normalizeTitle(artist)}`;
+}
+
+async function findSongMetadata(title, artist) {
+  const key = musicKey(title, artist);
+  if (musicMetadataCache.has(key)) return musicMetadataCache.get(key);
+  const query = new URL('https://itunes.apple.com/search');
+  query.searchParams.set('term', `${title} ${artist}`);
+  query.searchParams.set('media', 'music');
+  query.searchParams.set('entity', 'song');
+  query.searchParams.set('country', 'GB');
+  query.searchParams.set('limit', '8');
+  let metadata = null;
+  try {
+    const response = await fetch(query, { signal: AbortSignal.timeout(4_000) });
+    if (!response.ok) throw new Error('Catalog lookup failed.');
+    const { results = [] } = await response.json();
+    const targetTitle = normalizeTitle(title);
+    const targetArtist = normalizeTitle(artist);
+    const best = results
+      .filter((track) => track.wrapperType === 'track' && track.kind === 'song')
+      .map((track) => ({
+        track,
+        score: jaroWinklerSimilarity(targetTitle, normalizeTitle(track.trackName ?? '')) * 3
+          + jaroWinklerSimilarity(targetArtist, normalizeTitle(track.artistName ?? '')),
+      }))
+      .sort((left, right) => right.score - left.score)[0]?.track;
+    if (best && jaroWinklerSimilarity(targetTitle, normalizeTitle(best.trackName ?? '')) >= 0.86) {
+      metadata = {
+        artworkUrl: best.artworkUrl100?.replace(/\d+x\d+(?:bb)?/u, '300x300bb')?.replace(/^http:/u, 'https:'),
+        previewUrl: best.previewUrl?.replace(/^http:/u, 'https:'),
+        storeUrl: best.trackViewUrl,
+      };
+    }
+  } catch {
+    // Album art and previews are optional; the game remains playable without the catalog.
+  }
+  musicMetadataCache.set(key, metadata);
+  return metadata;
+}
+
+async function mapWithConcurrency(values, limit, map) {
+  const results = new Array(values.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, async () => {
+    while (next < values.length) {
+      const index = next++;
+      results[index] = await map(values[index]);
+    }
+  }));
+  return results;
 }
 
 function inviteUrl(req, code) {
@@ -329,6 +384,21 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
       const charset = type.startsWith('text/') || type.includes('javascript') || type.endsWith('svg+xml') ? '; charset=utf-8' : '';
       res.writeHead(200, { 'Content-Type': `${type}${charset}`, 'Cache-Control': 'no-cache' });
       return res.end(data);
+    }
+    if (req.method === 'POST' && url.pathname === '/api/music') {
+      const payload = await readJson(req);
+      if (!Array.isArray(payload.songs) || !payload.songs.length || payload.songs.length > 20) {
+        fail('Provide between 1 and 20 songs.');
+      }
+      const songs = payload.songs.map((song) => ({
+        title: field(song?.title, 80, 'Title'),
+        artist: field(song?.artist, 80, 'Artist'),
+      }));
+      const results = await mapWithConcurrency(songs, 4, async (song) => ({
+        ...song,
+        metadata: await findSongMetadata(song.title, song.artist),
+      }));
+      return sendJson(res, 200, { results });
     }
     if (req.method === 'POST' && url.pathname === '/api/rooms') {
       const data = await readJson(req);

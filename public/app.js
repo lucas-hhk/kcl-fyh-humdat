@@ -28,8 +28,11 @@ let heroNoteTransition = () => Promise.resolve();
 let welcomeSession;
 let backgroundMusic;
 let roundApplause;
+let catalogPreview;
 let gameMusicStopped = false;
 let soundVolume = 0.3;
+const songMetadata = new Map();
+let songMetadataLoading = false;
 try {
   const savedVolume = localStorage.getItem('humdat-volume');
   if (savedVolume !== null && Number.isFinite(Number(savedVolume))) {
@@ -39,7 +42,7 @@ try {
 
 function setSoundVolume(value) {
   soundVolume = Math.max(0, Math.min(1, Number(value)));
-  for (const audio of [backgroundMusic, roundApplause, media?.audio, ...document.querySelectorAll('audio')]) {
+  for (const audio of [backgroundMusic, roundApplause, catalogPreview, media?.audio, ...document.querySelectorAll('audio')]) {
     if (audio) audio.volume = soundVolume;
   }
   document.querySelectorAll('[data-volume-slider]').forEach((slider) => {
@@ -62,6 +65,15 @@ function startBackgroundMusic() {
 function stopBackgroundMusic() {
   if (!backgroundMusic) return;
   backgroundMusic.pause();
+}
+
+function stopCatalogPreview() {
+  if (!catalogPreview) return;
+  const previous = catalogPreview;
+  previous.pause();
+  previous.currentTime = 0;
+  if (previous.control?.isConnected) previous.control.textContent = 'Play 30 sec preview';
+  catalogPreview = undefined;
 }
 
 function syncBackgroundMusic(phase) {
@@ -320,6 +332,7 @@ function reset() {
   releaseSessionLock = undefined;
   releaseMedia();
   releaseRecording();
+  stopCatalogPreview();
   guessInProgress = false;
   session = undefined;
   state = undefined;
@@ -489,24 +502,65 @@ function poolView() {
   </section>`;
 }
 
+function songMetadataKey(song) {
+  return `${song.title}\u0000${song.artist}`;
+}
+
+async function loadSongMetadata() {
+  if (songMetadataLoading || state?.phase !== 'lobby') return;
+  const missing = state.songs.filter((song) => !songMetadata.has(songMetadataKey(song)));
+  if (!missing.length) return;
+  songMetadataLoading = true;
+  try {
+    const response = await request('/api/music', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ songs: missing.map(({ title, artist }) => ({ title, artist })) }),
+    });
+    const { results } = await response.json();
+    for (const result of results) {
+      songMetadata.set(`${result.title}\u0000${result.artist}`, result.metadata);
+    }
+    if (state?.phase === 'lobby') updatePool();
+  } catch {
+    // Covers and samples are enhancements, not a dependency for playing the game.
+  } finally {
+    songMetadataLoading = false;
+  }
+}
+
 function updatePool() {
   const songs = document.querySelector('#songs');
   const activeSong = document.activeElement?.dataset.song;
-  const songMarkup = state.songs.map((song) => `
-    <button type="button" class="song ${song.count >= 2 ? 'shared' : ''}" data-action="known" data-song="${song.id}"
-        aria-pressed="${song.known}">
-      <span class="song-label"><strong>${escapeHtml(song.title)}</strong><span>${escapeHtml(song.artist)}</span></span>
-      <span class="count">${song.count} know</span>
-    </button>`).join('');
+  const songMarkup = state.songs.map((song) => {
+    const metadata = songMetadata.get(songMetadataKey(song));
+    const cover = metadata?.artworkUrl
+      ? `<img class="song-cover" src="${escapeHtml(metadata.artworkUrl)}" alt="Album cover for ${escapeHtml(song.title)}">`
+      : '<span class="song-cover song-cover-placeholder" aria-hidden="true">♪</span>';
+    const preview = metadata?.previewUrl
+      ? `<button type="button" class="preview-button" data-action="preview-song" data-preview="${escapeHtml(metadata.previewUrl)}">Play 30 sec preview</button>`
+      : '<span class="preview-unavailable">Preview unavailable</span>';
+    const storeLink = metadata?.storeUrl
+      ? `<a class="store-link" href="${escapeHtml(metadata.storeUrl)}" target="_blank" rel="noopener noreferrer">View on iTunes ↗</a>`
+      : '';
+    return `<article class="song-card ${song.count >= 2 ? 'shared' : ''}">
+      ${cover}
+      <button type="button" class="song" data-action="known" data-song="${song.id}" aria-pressed="${song.known}">
+        <span class="song-label"><strong>${escapeHtml(song.title)}</strong><span>${escapeHtml(song.artist)}</span></span>
+        <span class="count">${song.count} know</span>
+      </button>
+      <div class="song-preview">${preview}${storeLink}</div>
+    </article>`;
+  }).join('');
   if (songs.dataset.content !== songMarkup) {
     songs.dataset.content = songMarkup;
     songs.innerHTML = songMarkup;
-    if (activeSong) [...songs.children].find((el) => el.dataset.song === activeSong)?.focus({ preventScroll: true });
+    if (activeSong) songs.querySelector(`[data-song="${activeSong}"]`)?.focus({ preventScroll: true });
   }
+  loadSongMetadata();
   const footer = document.querySelector('#pool-footer');
   const message = state.canStart ? `${state.sharedCount} ${state.sharedCount === 1 ? 'round' : 'rounds'} ready to play.`
     : 'Mark some of the same songs as your friends to start.';
-  const footerMarkup = `<p class="muted">${message}</p>${state.you === state.host ? `<div class="row">
+  const footerMarkup = `<p class="muted">${message}</p><p class="itunes-attribution">Artwork and previews provided courtesy of iTunes.</p>${state.you === state.host ? `<div class="row">
     ${button('Start game', 'start', 'primary', !state.canStart)}
   </div>` : ''}`;
   if (footer.dataset.content !== footerMarkup) {
@@ -651,6 +705,38 @@ async function playClue() {
     clue.useNative = false;
   }
   tick();
+}
+
+async function playSongPreview(control) {
+  const url = control.dataset.preview;
+  if (!url) return;
+  if (catalogPreview?.src === url && !catalogPreview.paused) {
+    stopCatalogPreview();
+    control.textContent = 'Play 30 sec preview';
+    startBackgroundMusic();
+    return;
+  }
+  stopCatalogPreview();
+  stopBackgroundMusic();
+  const preview = new Audio(url);
+  preview.volume = soundVolume;
+  preview.control = control;
+  catalogPreview = preview;
+  control.textContent = 'Pause preview';
+  preview.addEventListener('ended', () => {
+    if (catalogPreview !== preview) return;
+    catalogPreview = undefined;
+    if (control.isConnected) control.textContent = 'Play 30 sec preview';
+    startBackgroundMusic();
+  }, { once: true });
+  try {
+    await preview.play();
+  } catch {
+    if (catalogPreview === preview) catalogPreview = undefined;
+    control.textContent = 'Play 30 sec preview';
+    startBackgroundMusic();
+    throw new Error('Could not play this preview.');
+  }
 }
 
 function tick() {
@@ -1003,6 +1089,8 @@ document.addEventListener('click', async (event) => {
     } else if (type === 'spotify') {
       window.open('https://accounts.spotify.com/login', 'spotify-login', 'popup,width=480,height=720,noopener');
       tell('Spotify sign-in opened. This preview does not access your account yet.');
+    } else if (type === 'preview-song') {
+      await playSongPreview(control);
     } else if (type === 'record') {
       await startRecording();
     } else if (type === 'stop') {

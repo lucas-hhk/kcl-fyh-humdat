@@ -67,6 +67,7 @@ test('a room keeps the clue private, scores timed guesses, and rotates singers',
   const qr = await fetch(`${base}${room}/qr`);
   assert.equal(qr.headers.get('content-type'), 'image/svg+xml');
   assert.match(await qr.text(), /<svg/);
+  assert.equal((await post('/api/music', { songs: [] })).status, 400);
   const { data: listener } = await post(`${room}/join`, { name: 'Sam' });
   const { data: third } = await post(`${room}/join`, { name: 'Alex' });
   const hostStream = await stream(host);
