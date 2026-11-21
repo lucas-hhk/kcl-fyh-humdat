@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: humdat-playtest
+    runtime: node
+    region: frankfurt
+    plan: free
+    buildCommand: node --check server.js
+    startCommand: npm start
+    healthCheckPath: /

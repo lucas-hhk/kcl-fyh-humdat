@@ -8,6 +8,10 @@ With Node.js 22 or newer, run `npm start` and open [http://localhost:3000](http:
 
 For play on separate devices, serve the same running Node process behind HTTPS and share that HTTPS URL. Browsers allow microphone access on HTTPS and on localhost. A plain HTTP link to your computer’s LAN address won’t allow recording on a phone. If you use a reverse proxy, disable buffering for the room event stream. Set the `PORT` environment variable to change the server port.
 
+## Host the HTTPS playtest
+
+[Deploy to Render](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Flucas-hhk%2FKCL-first-year-hack) with a Render account that has access to this repository. Approve the free web service and share the HTTPS URL shown on the service dashboard. The service uses the same URL after waking from idle. The first visit after an idle period can take about a minute.
+
 ## Play a game
 
 1. Create a room and share the code or invite link. Two to ten people can play.
