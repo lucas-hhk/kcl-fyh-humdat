@@ -6,6 +6,7 @@ import QRCode from 'qrcode';
 
 const staticFiles = new Map([
   ['/', ['index.html', 'text/html']],
+  ['/join', ['index.html', 'text/html']],
   ['/style.css', ['style.css', 'text/css']],
   ['/app.js', ['app.js', 'text/javascript']],
   ['/background-music.mp3', ['background-music.mp3', 'audio/mpeg']],
@@ -162,7 +163,7 @@ function inviteUrl(req, code) {
   const forwardedProto = req.headers['x-forwarded-proto'];
   const protocol = (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto) === 'https'
     ? 'https' : 'http';
-  const url = new URL('/', `${protocol}://${host}`);
+  const url = new URL('/join', `${protocol}://${host}`);
   url.searchParams.set('room', code);
   return url.href;
 }

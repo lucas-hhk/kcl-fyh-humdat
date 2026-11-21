@@ -61,6 +61,12 @@ test('a room keeps the clue private, scores timed guesses, and rotates singers',
   assert.equal(status, 201);
   assert.match(host.code, /^[A-Z2-9]{5}$/);
   const room = `/api/rooms/${host.code}`;
+  const joinPage = await fetch(`${base}/join?room=${host.code}`);
+  assert.equal(joinPage.status, 200);
+  assert.match(await joinPage.text(), /id="app"/);
+  const qr = await fetch(`${base}${room}/qr`);
+  assert.equal(qr.headers.get('content-type'), 'image/svg+xml');
+  assert.match(await qr.text(), /<svg/);
   const { data: listener } = await post(`${room}/join`, { name: 'Sam' });
   const { data: third } = await post(`${room}/join`, { name: 'Alex' });
   const hostStream = await stream(host);

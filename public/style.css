@@ -77,6 +77,10 @@ h3 { font-size: 1.06rem; }
 .eyebrow { font-weight: 800; font-size: .875rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
 .panel { border: 1px solid var(--border); background: var(--surface); border-radius: 24px; padding: clamp(18px, 3vw, 32px); }
 .entry { position: relative; margin-top: 0; max-width: none; }
+.join-room-intro { display: grid; gap: 6px; }
+.join-room-intro h2 { font-size: clamp(2rem, 8vw, 3.1rem); letter-spacing: .06em; }
+.join-room-button { width: 100%; margin-top: 18px; }
+.entry-alternate { margin-top: 12px; text-align: center; }
 .cat-walk {
   position: absolute; z-index: 1; top: -90px; right: 12px; width: 170px; height: auto;
   mix-blend-mode: darken; pointer-events: none;
@@ -203,19 +207,30 @@ input::placeholder { color: var(--muted); opacity: .78; }
   .welcome-wordmark { font-size: clamp(8rem, 20vw, 12rem); }
 }
 @media (max-width: 460px) {
-  main { padding: 22px 14px; }
-  .topbar { padding-inline: 14px; }
+  main { padding: 20px 14px 32px; }
+  .topbar { min-height: auto; padding: 12px 14px; align-items: flex-start; }
   .brand-lockup { gap: 12px; }
-  .music-doodle { height: 38px; }
-  .welcome-wordmark { font-size: clamp(4.5rem, 18vw, 6rem); }
+  .music-doodle { display: none; }
+  .wordmark { font-size: 1.35rem; }
+  .welcome-wordmark { font-size: clamp(3.2rem, 18vw, 5.25rem); }
   .welcome-wordmark .brand-icon { width: .86em; height: 1.3em; }
-  .welcome-start { min-width: 210px; min-height: 64px; font-size: 1.5rem; }
+  .welcome-start { min-width: 200px; min-height: 60px; font-size: 1.35rem; }
   input.volume-slider { width: 76px; }
   .welcome-volume { top: 14px; right: 14px; }
-  .header-actions .button { padding-inline: 9px; }
+  .header-actions { flex-wrap: wrap; justify-content: flex-end; }
+  .header-actions .button { min-height: 40px; padding-inline: 9px; font-size: .82rem; }
+  input:not(.volume-slider) { min-height: 52px; font-size: 16px; }
+  .button { min-height: 50px; }
+  .cat-walk { display: none; }
+  .entry-room-code { display: grid; grid-template-columns: 1fr; }
+  .entry-room-code .button { width: 100%; }
   .songs { grid-template-columns: 1fr; }
-  .lobby-invite { align-items: flex-start; }
+  .lobby-invite { align-items: flex-start; gap: 12px; }
+  .invite-code { font-size: 1.45rem; letter-spacing: .08em; overflow-wrap: anywhere; }
   .invite-qr { width: 100px; height: 100px; }
+  .scoreboard { padding: 16px; }
+  .spotify-connect { gap: 10px; }
+  .hum-visualizer { min-height: 190px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .music-piece { animation: none; }

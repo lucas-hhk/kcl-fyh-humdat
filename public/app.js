@@ -146,16 +146,18 @@ function showHome() {
       <form id="entry" class="panel entry">
         <img class="cat-walk" src="/cat-walking.png" alt="" aria-hidden="true">
         <div class="stack">
-          <div><label for="name">Your name</label><input id="name" name="name" maxlength="24" placeholder="Enter a nickname" required autocomplete="nickname"></div>
+          ${inviteCode ? `<div class="join-room-intro"><p class="eyebrow">You’re joining</p><h2>Room ${escapeHtml(inviteCode)}</h2><p class="muted">Choose a name to enter the lobby.</p></div>` : ''}
+          <div><label for="name">Your name</label><input id="name" name="name" maxlength="24" placeholder="Enter a nickname" required autocomplete="nickname" ${inviteCode ? 'autofocus' : ''}></div>
           ${inviteCode ? '' : '<button class="button primary" name="intent" value="create">Create a room</button>'}
         </div>
-        <hr class="divider">
-        <label for="room-code">Room code</label>
-        <div class="row">
-          <input id="room-code" name="code" maxlength="5" placeholder="ABCDE" value="${escapeHtml(inviteCode)}" autocomplete="off" spellcheck="false" autocapitalize="characters">
-          <button class="button ${inviteCode ? 'primary' : ''}" name="intent" value="join">Join room</button>
-        </div>
-        ${inviteCode ? '<p style="margin-top: 12px"><a href="/" class="muted">Create your own room</a></p>' : ''}
+        ${inviteCode ? `<input id="room-code" name="code" type="hidden" value="${escapeHtml(inviteCode)}">
+          <button class="button primary join-room-button" name="intent" value="join">Join room ${escapeHtml(inviteCode)}</button>
+          <p class="entry-alternate"><a href="/" class="muted">Create your own room</a></p>` : `<hr class="divider">
+          <label for="room-code">Room code</label>
+          <div class="row entry-room-code">
+            <input id="room-code" name="code" maxlength="5" placeholder="ABCDE" autocomplete="off" spellcheck="false" autocapitalize="characters">
+            <button class="button" name="intent" value="join">Join room</button>
+          </div>`}
       </form>
     </section>`;
   animateHeroNote(app.querySelector('.hero-title'));
@@ -425,7 +427,7 @@ function openRoom(nextSession) {
       sessionStorage.removeItem(storageKey);
       showHome();
       const code = document.querySelector('#room-code');
-      code.value = nextSession.code;
+      if (code) code.value = nextSession.code;
       tell('This room is open in another tab. Join with a different name to play here.');
       return;
     }
@@ -986,7 +988,7 @@ document.addEventListener('click', async (event) => {
         reset();
       }
     } else if (type === 'invite') {
-      const url = new URL('/', location.href);
+      const url = new URL('/join', location.href);
       url.searchParams.set('room', session.code);
       if (navigator.clipboard) {
         try {
@@ -1042,5 +1044,5 @@ let saved;
 try { saved = JSON.parse(sessionStorage.getItem(storageKey)); } catch { /* Start at the entry screen. */ }
 if (saved?.token && /^[A-Z2-9]{5}$/.test(saved.code) && (!inviteCode || inviteCode === saved.code)) welcomeSession = saved;
 showHome();
-showWelcome();
+if (!inviteCode) showWelcome();
 setSoundVolume(soundVolume);
