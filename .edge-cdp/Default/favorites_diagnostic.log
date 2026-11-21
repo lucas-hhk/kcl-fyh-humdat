@@ -1,0 +1,26 @@
+2026-11-21 18:04:28.737: [INFO] CurrentProfilePath: C:\Users\dylan\IdeaProjects\KCL-first-year-hack\.edge-cdp\Default
+2026-11-21 18:04:28.737: [INFO] Profiles total count: 1
+2026-11-21 18:04:28.737: [INFO] Profile: name=Profile 1 path=C:\Users\dylan\IdeaProjects\KCL-first-year-hack\.edge-cdp\Default lastActive=null
+2026-11-21 18:04:28.737: [INFO] LastUsedProfileDir: C:\Users\dylan\IdeaProjects\KCL-first-year-hack\.edge-cdp\Default
+2026-11-21 18:04:28.737: [INFO] VisibilityChanged: 0
+2026-11-21 18:04:28.793: [INFO] OnDoneLoading sync enabled: 0
+2026-11-21 18:04:28.793: [INFO] BookmarkModelLoaded, ids_reassigned: 0
+2026-11-21 18:04:28.793: [INFO] BookmarksLoadDropped droppedNodes=0
+2026-11-21 18:04:28.793: [INFO] BookmarksSnapshot Startup total=0 bar=0 other=0 mobile=0 showBar=0 showBarNTP=1
+2026-11-21 18:04:28.801: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-11-21 18:04:29.439: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 0
+2026-11-21 18:04:29.451: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 3
+2026-11-21 18:04:29.454: [INFO] Primary account changed.
+2026-11-21 18:04:29.454: [INFO] OnPrimaryAccountChanged PrimaryAccountChangeEvent::Type::kSet
+2026-11-21 18:04:29.470: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 3
+2026-11-21 18:04:29.500: [INFO] RecordSyncInitDuration has_sync_been_enabled: 0 state: 3
+2026-11-21 18:04:31.320: [INFO] BookmarkNodeAdded, ABU: 0
+2026-11-21 18:04:31.321: [INFO] BookmarkNodeAdded, ABU: 0
+2026-11-21 18:04:31.321: [INFO] BookmarkNodeAdded, ABU: 0
+2026-11-21 18:04:31.321: [INFO] BookmarkNodeAdded, ABU: 0
+2026-11-21 18:04:31.322: [INFO] BookmarkNodeAdded, ABU: 0
+2026-11-21 18:04:31.322: [INFO] BookmarkNodeAdded, ABU: 0
+2026-11-21 18:04:31.322: [INFO] BookmarkNodeAdded, ABU: 0
+2026-11-21 18:04:31.322: [INFO] BookmarkNodeAdded, ABU: 0
+2026-11-21 18:04:31.349: [INFO] BookmarkBarPrefChanged showBar=0 showBarNTP=0
+2026-11-21 18:04:31.488: [INFO] Sync initialization duration: 1897ms

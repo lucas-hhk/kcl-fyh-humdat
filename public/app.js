@@ -241,31 +241,58 @@ function animateHeroNote(title) {
   const getPosition = (name) => {
     const titleRect = title.getBoundingClientRect();
     const anchorRect = anchors[name].getBoundingClientRect();
+    const noteRect = note.getBoundingClientRect();
     return {
-      x: anchorRect.left - titleRect.left + anchorRect.width / 2 - note.offsetWidth / 2,
-      y: anchorRect.top - titleRect.top - note.offsetHeight + 22,
+      x: anchorRect.left - titleRect.left + anchorRect.width / 2 - noteRect.width / 2,
+      y: anchorRect.top - titleRect.top - noteRect.height + 6,
     };
   };
   const placeAt = (name) => {
     const { x, y } = getPosition(name);
-    note.style.transform = `translate(${x}px, ${y}px)`;
+    note.style.left = `${x}px`;
+    note.style.top = `${y}px`;
+    note.style.transform = 'none';
   };
   const moveBetween = async (from, to, duration) => {
     const start = getPosition(from);
     const end = getPosition(to);
-    const keyframes = Array.from({ length: 9 }, (_, index) => {
-      const progress = index / 8;
-      const x = start.x + (end.x - start.x) * progress;
-      const y = start.y + (end.y - start.y) * progress - Math.sin(progress * Math.PI * 6) * 8;
-      return { transform: `translate(${x}px, ${y}px)`, offset: progress };
+    await new Promise((resolve) => {
+      let frameId;
+      let paused = false;
+      let cancelled = false;
+      const startedAt = performance.now();
+      const finish = () => {
+        if (cancelled) return;
+        cancelled = true;
+        if (frameId) cancelAnimationFrame(frameId);
+        if (activeMovement === movement) activeMovement = undefined;
+        resolve();
+      };
+      const movement = {
+        pause() {
+          if (cancelled || paused) return;
+          paused = true;
+          if (frameId) cancelAnimationFrame(frameId);
+        },
+        cancel: finish,
+      };
+      const draw = (now) => {
+        if (cancelled) return;
+        if (isTransitioning) return finish();
+        if (paused) return;
+        const progress = Math.min(1, (now - startedAt) / duration);
+        const x = start.x + (end.x - start.x) * progress;
+        const bounceHeight = reducedMotion ? 6 : 12;
+        const y = start.y + (end.y - start.y) * progress
+          - Math.abs(Math.sin(progress * Math.PI * 2)) * bounceHeight;
+        note.style.left = `${x}px`;
+        note.style.top = `${y}px`;
+        if (progress < 1) frameId = requestAnimationFrame(draw);
+        else finish();
+      };
+      activeMovement = movement;
+      frameId = requestAnimationFrame(draw);
     });
-    const animation = note.animate(keyframes, { duration, easing: 'linear' });
-    activeMovement = animation;
-    await animation.finished.catch(() => {});
-    if (isTransitioning) return;
-    note.style.transform = keyframes.at(-1).transform;
-    animation.cancel();
-    activeMovement = undefined;
   };
 
   heroNoteTransition = async () => {
@@ -311,16 +338,14 @@ function animateHeroNote(title) {
     await Promise.all([wipe.finished, zoom.finished].map((finished) => finished.catch(() => {})));
   };
 
+  const movementDuration = reducedMotion ? 3200 : 2100;
   placeAt('hum');
   note.style.opacity = 1;
-  if (reducedMotion) {
-    return;
-  }
   (async () => {
     while (title.isConnected && !isTransitioning) {
-      await moveBetween('hum', 'dat', 3200);
+      await moveBetween('hum', 'dat', movementDuration);
       if (!title.isConnected || isTransitioning) break;
-      await moveBetween('dat', 'hum', 3200);
+      await moveBetween('dat', 'hum', movementDuration);
     }
   })();
 }
