@@ -1,3 +1,5 @@
+import { encodeWav } from './wav.js';
+
 const app = document.querySelector('#app');
 const header = document.querySelector('#header-room');
 const status = document.querySelector('#status');
@@ -18,6 +20,8 @@ let renderedPhase;
 let clockOffset = 0;
 let toastTimeout;
 let media;
+let syncTimer;
+let playbackContext;
 let recording;
 let uploadInProgress = false;
 let guessInProgress = false;
@@ -92,6 +96,7 @@ function showHome() {
 
 function reset() {
   events?.close();
+  clearInterval(syncTimer);
   releaseSessionLock?.();
   releaseSessionLock = undefined;
   releaseMedia();
@@ -112,30 +117,35 @@ function connect(nextSession) {
   header.innerHTML = `<div class="header-actions">${button('Copy invite', 'invite')}${button('Leave room', 'leave', 'subtle')}</div>`;
   app.innerHTML = '<section class="panel"><p>Connecting to the room…</p></section>';
   events = new EventSource(roomPath(`events?token=${encodeURIComponent(session.token)}`));
-  events.onmessage = ({ data }) => {
-    if (session !== nextSession) return;
-    const next = JSON.parse(data);
-    const sameRound = next.round?.id === state?.round?.id;
-    if (!sameRound || next.phase === 'reveal') releaseMedia();
-    if (state?.phase === 'recording' && next.phase !== 'recording') releaseRecording();
-    state = next;
-    clockOffset = next.serverTime - Date.now();
-    renderRoom();
-  };
-  events.onerror = async () => {
-    if (session !== nextSession) return;
+  events.onmessage = ({ data }) => applyState(JSON.parse(data), nextSession);
+  let syncing = false;
+  async function syncRoom() {
+    if (syncing || session !== nextSession) return;
+    syncing = true;
     try {
-      await roomRequest('session', {}, nextSession);
+      const response = await roomRequest('session', { signal: AbortSignal.timeout(6000) }, nextSession);
+      applyState(await response.json(), nextSession);
     } catch (error) {
-      if (session !== nextSession) return;
-      if (error.status === 401 || error.status === 404) {
+      if (session === nextSession && [401, 404].includes(error.status)) {
         reset();
         tell('Your room has expired.', true);
-        return;
       }
+    } finally {
+      syncing = false;
     }
-    if (session === nextSession && events.readyState !== EventSource.OPEN) tell('Connection lost. Reconnecting…', true);
-  };
+  }
+  syncTimer = setInterval(syncRoom, 2500);
+  events.onerror = syncRoom;
+}
+
+function applyState(next, nextSession) {
+  if (session !== nextSession || (state && next.revision <= state.revision)) return;
+  const sameRound = next.round?.id === state?.round?.id;
+  if (!sameRound || next.phase === 'reveal') releaseMedia();
+  if (state?.phase === 'recording' && (!sameRound || next.phase !== 'recording')) releaseRecording();
+  state = next;
+  clockOffset = next.serverTime - Date.now();
+  renderRoom();
 }
 
 function openRoom(nextSession) {
@@ -240,10 +250,10 @@ function roundView() {
       <h2>${escapeHtml(round.title)}</h2><p class="muted">${escapeHtml(round.artist)} · Hum up to 12 seconds.</p>
       <div class="audio-controls" id="recording-controls">
         ${button('Record clue', 'record', 'primary')}
-        ${button('Stop recording', 'stop')}
+        ${button('Stop and send', 'stop')}
         <span id="recording-timer" class="recording-timer"></span>
-        <audio id="recording-preview" controls preload="metadata"></audio>
-        <div id="recording-review" class="row">${button('Share clue', 'share', 'primary')}${button('Try again', 'retry')}</div>
+        <p id="recording-status" class="muted" role="status"></p>
+        ${button('Retry sending', 'retry-send')}
       </div>
       <div>${button('Skip song', 'skip', 'subtle')}</div>`
       : `<h2>${name(round.singerId)} is up</h2><p class="muted">They’re recording a clue. Get ready to guess the song title.</p>
@@ -253,10 +263,7 @@ function roundView() {
   } else if (phase === 'guessing') {
     contents = `<h2>${singer ? 'Your friends are guessing' : 'Name that hum'}</h2>
       <div class="timer" id="timer" role="timer"></div><div class="timer-track" aria-hidden="true"><div id="timer-bar"></div></div>
-      ${round.canGuess ? `<div id="play-area" class="audio-controls">
-        <div id="clue-audio"></div>${button('Play clue', 'play', 'primary', true)}
-        <span id="clue-message" class="muted"></span>
-      </div>
+      ${round.canGuess ? `<p id="clue-message" class="muted"></p>
       <form class="row" id="guess">
         <input id="guess-title" name="guess" aria-label="Song title" placeholder="Enter song title" maxlength="100" autocomplete="off" required disabled>
         <button class="button primary" disabled>Guess</button>
@@ -277,48 +284,50 @@ function roundView() {
 
 function releaseMedia() {
   if (!media) return;
-  media.audio?.pause();
-  if (media.url) URL.revokeObjectURL(media.url);
+  media.controller.abort();
+  media.source?.stop();
+  media.source?.disconnect();
   media = undefined;
 }
 
-async function loadClue() {
+function enableSound() {
+  try {
+    playbackContext ??= new AudioContext();
+    if (playbackContext.state !== 'running') playbackContext.resume().then(tick).catch(() => {});
+  } catch {
+    // The guessing screen displays the playback status.
+  }
+}
+
+async function loadClue(attempt = 1) {
   const roundId = state.round.id;
   if (media?.id === roundId) return;
   const current = session;
-  const clue = { id: roundId, audio: null, url: null, error: false, attempted: false, started: false };
+  const clue = { id: roundId, controller: new AbortController(), buffer: null, source: null, error: false };
   media = clue;
+  const timeout = setTimeout(() => clue.controller.abort(), 35000);
   try {
-    const response = await roomRequest(`clip?round=${roundId}`, {}, current);
-    const blob = await response.blob();
+    const response = await roomRequest(`clip?round=${roundId}`, {
+      signal: clue.controller.signal,
+    }, current);
+    const bytes = await response.arrayBuffer();
+    const buffer = await new OfflineAudioContext(1, 1, 24000).decodeAudioData(bytes);
     if (media !== clue || session !== current) return;
-    clue.url = URL.createObjectURL(blob);
-    const audio = new Audio(clue.url);
-    audio.preload = 'auto';
-    clue.audio = audio;
-    audio.addEventListener('error', () => {
-      if (media !== clue) return;
-      clue.error = true;
-      clue.started = false;
-      clue.audio.remove();
-      clue.audio = null;
-      tick();
-    });
+    clue.buffer = buffer;
     if (state.phase === 'preparing') await action('ready', { roundId }, current);
   } catch {
-    if (media === clue && !clue.audio) clue.error = true;
+    if (media === clue && !clue.buffer) {
+      clue.error = true;
+      if (attempt < 3) setTimeout(() => {
+        if (media !== clue) return;
+        releaseMedia();
+        loadClue(attempt + 1);
+      }, 500 * attempt);
+    }
+  } finally {
+    clearTimeout(timeout);
   }
   tick();
-}
-
-function playClue() {
-  if (!media?.audio) return;
-  const clue = media;
-  clue.audio.play().then(() => {
-    if (media !== clue) return;
-    clue.started = true;
-    tick();
-  }).catch(() => {});
 }
 
 function tick() {
@@ -344,22 +353,17 @@ function tick() {
   const correct = document.querySelector('#correct');
   correct.hidden = !round.correct;
   if (round.correct) correct.textContent = `Correct! You earned ${round.earned} points.`;
-  const play = document.querySelector('[data-action="play"]');
-  play.disabled = !started || !remaining || (!media?.audio && !media?.error);
-  play.textContent = media?.error ? 'Retry loading clue' : 'Play clue';
-  play.hidden = Boolean(media?.started);
-  const message = document.querySelector('#clue-message');
-  message.textContent = media?.error ? 'Could not load the recording.' : (!media?.audio ? 'Loading clue…' : '');
-  if (started && remaining && media?.audio && !media.attempted) {
-    media.attempted = true;
-    playClue();
-  }
-  if (media?.started) {
-    const container = document.querySelector('#clue-audio');
-    if (!container.contains(media.audio)) {
-      media.audio.controls = true;
-      container.append(media.audio);
-    }
+  const playing = playbackContext?.state === 'running';
+  const message = media?.error ? 'Could not load the clue.' : !media?.buffer ? 'Loading clue…'
+    : !playing ? 'Tap anywhere to restore sound.' : '';
+  document.querySelector('#clue-message').textContent = message;
+  if (remaining && playing && media?.buffer && !media.source) {
+    const source = playbackContext.createBufferSource();
+    source.buffer = media.buffer;
+    source.connect(playbackContext.destination);
+    media.source = source;
+    source.onended = () => source.disconnect();
+    source.start(playbackContext.currentTime + Math.max(0, round.startsAt - now) / 1000);
   }
 }
 
@@ -371,7 +375,6 @@ function releaseRecording() {
   clearTimeout(previous.timer);
   if (previous.recorder?.state === 'recording') previous.recorder.stop();
   previous.stream?.getTracks().forEach((track) => track.stop());
-  if (previous.url) URL.revokeObjectURL(previous.url);
 }
 
 function updateRecording() {
@@ -384,16 +387,50 @@ function updateRecording() {
   stop.hidden = !active;
   const timer = controls.querySelector('#recording-timer');
   timer.hidden = !active;
-  const preview = controls.querySelector('#recording-preview');
-  preview.hidden = !recording?.blob;
-  if (recording?.url && preview.getAttribute('src') !== recording.url) preview.src = recording.url;
-  if (!recording && preview.hasAttribute('src')) {
-    preview.removeAttribute('src');
-    preview.load();
+  controls.querySelector('#recording-status').textContent = recording?.sendingMessage ?? '';
+  controls.querySelector('[data-action="retry-send"]').hidden = !recording?.blob || uploadInProgress;
+}
+
+async function sendRecording() {
+  if (uploadInProgress || !recording?.blob) return;
+  const clue = recording;
+  uploadInProgress = true;
+  clue.sendingMessage = 'Sending clue…';
+  updateRecording();
+  try {
+    const current = session;
+    const roundId = state.round.id;
+    const bytes = await clue.blob.arrayBuffer();
+    let offset = clue.received ?? 0;
+    while (offset < bytes.byteLength && recording === clue) {
+      const end = Math.min(bytes.byteLength, offset + 12288);
+      const path = `clip?round=${roundId}&offset=${offset}&total=${bytes.byteLength}`;
+      clue.sendingMessage = `Sending clue… ${Math.floor(100 * offset / bytes.byteLength)}%`;
+      updateRecording();
+      try {
+        const response = await roomRequest(path, {
+          method: 'POST', headers: { 'Content-Type': clue.blob.type }, body: bytes.slice(offset, end),
+          signal: AbortSignal.timeout(12000),
+        }, current);
+        const result = await response.json();
+        if (result.phase) {
+          applyState(result, current);
+          break;
+        }
+        if (result.received !== end) throw new Error('The server could not confirm receipt of the clue.');
+        offset = clue.received = end;
+        clue.retryOffset = undefined;
+      } catch (error) {
+        if (clue.retryOffset === offset || error.status < 500) throw error;
+        clue.retryOffset = offset;
+      }
+    }
+  } catch (error) {
+    if (recording !== clue) return;
+    uploadInProgress = false;
+    clue.sendingMessage = error.message;
+    updateRecording();
   }
-  controls.querySelector('#recording-review').hidden = !recording?.blob;
-  controls.querySelector('[data-action="share"]').disabled = uploadInProgress;
-  controls.querySelector('[data-action="retry"]').disabled = uploadInProgress;
 }
 
 async function startRecording() {
@@ -411,21 +448,35 @@ async function startRecording() {
       return;
     }
     next.stream = stream;
-    const mimeType = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus']
+    const sharedFormat = state.round.formats?.find((type) => MediaRecorder.isTypeSupported(type));
+    const mimeType = sharedFormat ?? ['audio/webm;codecs=opus', 'audio/mp4', 'audio/ogg;codecs=opus']
       .find((type) => MediaRecorder.isTypeSupported(type));
-    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    const recorder = new MediaRecorder(stream, { ...(mimeType && { mimeType }), audioBitsPerSecond: 24000 });
     next.recorder = recorder;
     const chunks = [];
     recorder.ondataavailable = ({ data }) => { if (data.size) chunks.push(data); };
-    recorder.onstop = () => {
+    recorder.onstop = async () => {
       stream.getTracks().forEach((track) => track.stop());
       clearTimeout(next.timer);
       if (recording !== next) return;
-      next.blob = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type });
-      if (next.blob.size) next.url = URL.createObjectURL(next.blob);
-      else {
+      next.sendingMessage = 'Preparing clue…';
+      updateRecording();
+      const original = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type });
+      try {
+        if (!original.size) throw new Error('The recording was empty. Try again.');
+        if (sharedFormat) {
+          next.blob = original;
+        } else {
+          const decoder = new OfflineAudioContext(1, 1, 24000);
+          const decoded = await decoder.decodeAudioData(await original.arrayBuffer());
+          if (recording !== next) return;
+          next.blob = encodeWav(decoded);
+        }
+        await sendRecording();
+      } catch (error) {
+        if (recording !== next) return;
         releaseRecording();
-        tell('The recording was empty. Try again.', true);
+        tell(original.size ? 'Could not prepare this recording for playback. Try again.' : error.message, true);
       }
       updateRecording();
     };
@@ -455,6 +506,7 @@ document.addEventListener('submit', async (event) => {
   const data = new FormData(form);
   const submitter = event.submitter ?? form.querySelector('button');
   if (submitter.disabled) return;
+  enableSound();
   submitter.disabled = true;
   try {
     if (form.id === 'entry') {
@@ -462,9 +514,11 @@ document.addEventListener('submit', async (event) => {
       const joining = submitter.value === 'join' || (submitter.value !== 'create' && code);
       if (joining && !/^[A-Z2-9]{5}$/.test(code)) throw new Error('Enter the five-character room code.');
       for (const element of form.querySelectorAll('button')) element.disabled = true;
+      const probe = new Audio();
+      const formats = ['audio/webm;codecs=opus', 'audio/mp4;codecs=mp4a.40.2'].filter((type) => probe.canPlayType(type));
       const response = await request(joining ? `/api/rooms/${code}/join` : '/api/rooms', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: data.get('name') }),
+        body: JSON.stringify({ name: data.get('name'), formats }),
       }).finally(() => {
         for (const element of form.querySelectorAll('button')) element.disabled = false;
       });
@@ -493,6 +547,7 @@ document.addEventListener('submit', async (event) => {
 });
 
 document.addEventListener('click', async (event) => {
+  enableSound();
   const control = event.target.closest('[data-action]');
   if (!control) return;
   const type = control.dataset.action;
@@ -521,26 +576,8 @@ document.addEventListener('click', async (event) => {
       await startRecording();
     } else if (type === 'stop') {
       if (recording?.recorder?.state === 'recording') recording.recorder.stop();
-    } else if (type === 'retry') {
-      releaseRecording();
-      await startRecording();
-    } else if (type === 'share') {
-      if (uploadInProgress || !recording?.blob) return;
-      uploadInProgress = true;
-      updateRecording();
-      try {
-        await roomRequest(`clip?round=${state.round.id}`, {
-          method: 'POST', headers: { 'Content-Type': recording.blob.type }, body: recording.blob,
-        });
-      } finally {
-        uploadInProgress = false;
-        updateRecording();
-      }
-    } else if (type === 'play') {
-      if (media?.error) {
-        releaseMedia();
-        await loadClue();
-      } else playClue();
+    } else if (type === 'retry-send') {
+      await sendRecording();
     } else if (type === 'known') {
       control.disabled = true;
       try {

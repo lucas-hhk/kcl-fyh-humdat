@@ -12,8 +12,8 @@ For play on separate devices, serve the same running Node process behind HTTPS a
 
 1. Create a room and share the code or invite link. Two to forty people can play.
 2. Each player marks songs they know or adds favourites by title and artist. Pick several songs in common to give everyone a turn.
-3. The host starts the game. The singer privately sees a song and records up to 12 seconds. They can preview, re-record, or share their clue.
-4. Listeners have 20 seconds to enter the title. Correct guesses earn 20–100 points based on speed. The singer earns up to 100 points based on the share of listeners who guessed correctly.
+3. The host starts the game. The singer privately sees a song and records up to 12 seconds. Stopping the recording sends the clue automatically.
+4. The clue plays automatically when the shared 20-second guessing timer starts. Correct guesses earn 20–100 points based on speed. The singer earns up to 100 points based on the share of listeners who guessed correctly.
 5. Continue to the next singer. Each player gets one turn when there are enough shared songs. The host can finish early or start a rematch.
 
 Room state and the current recording live in server memory. The recording is dropped when the host advances. Rooms expire after an hour of inactivity and reset when the server restarts.

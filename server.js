@@ -7,6 +7,7 @@ const staticFiles = new Map([
   ['/', ['index.html', 'text/html']],
   ['/style.css', ['style.css', 'text/css']],
   ['/app.js', ['app.js', 'text/javascript']],
+  ['/wav.js', ['wav.js', 'text/javascript']],
 ].map(([url, [file, type]]) => [
   url, [readFileSync(new URL(`./public/${file}`, import.meta.url)), type],
 ]));
@@ -85,7 +86,7 @@ function availableSongs(room, singerId) {
     .filter(({ count }) => count >= 2);
 }
 
-export function createGameServer({ guessMs = 20_000, prepareMs = 8_000, leadMs = 1_500 } = {}) {
+export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs = 500 } = {}) {
   const rooms = new Map();
 
   function snapshot(room, player) {
@@ -99,6 +100,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 8_000, leadMs =
       : [];
     return {
       code: room.code,
+      revision: room.revision,
       you: player.id,
       host: room.hostId,
       phase: room.phase,
@@ -114,6 +116,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 8_000, leadMs =
       canStart: eligible.length > 0,
       round: round && {
         id: round.id,
+        formats: singer ? round.formats : undefined,
         number: room.roundNumber,
         singerId: round.singerId,
         title: singer || revealed ? round.song.title : undefined,
@@ -132,6 +135,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 8_000, leadMs =
   }
 
   function broadcast(room) {
+    room.revision++;
     room.touchedAt = Date.now();
     for (const player of room.players.values()) {
       player.stream?.write(`data: ${JSON.stringify(snapshot(room, player))}\n\n`);
@@ -152,8 +156,11 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 8_000, leadMs =
     room.roundNumber += 1;
     room.round = {
       id: randomUUID(), singerId: singer.id, song: top[randomInt(top.length)].song,
+      formats: ['audio/webm;codecs=opus', 'audio/mp4;codecs=mp4a.40.2'].filter((type) =>
+        [...room.players.values()].every((p) => p.id === singer.id || p.formats.includes(type))),
       clip: null, mime: null, startsAt: null, endsAt: null, skipped: false,
-      listeners: new Set(), ready: new Set(), correct: new Map(), singerPoints: 0,
+      listeners: new Set([...room.onlineIds].filter((id) => id !== singer.id)),
+      ready: new Set(), correct: new Map(), singerPoints: 0,
     };
   }
 
@@ -182,7 +189,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 8_000, leadMs =
     broadcast(room);
   }
 
-  function addPlayer(room, name) {
+  function addPlayer(room, name, formats) {
     if (room.players.size >= maxPlayersPerRoom) {
       fail(`This room is full (maximum ${maxPlayersPerRoom} players).`, 409);
     }
@@ -190,6 +197,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 8_000, leadMs =
       fail('That name is already taken in this room.', 409);
     }
     const player = { id: randomUUID(), name, score: 0, stream: null };
+    player.formats = Array.isArray(formats) ? formats.filter((f) => typeof f === 'string').slice(0, 2) : [];
     const token = randomBytes(24).toString('hex');
     room.players.set(player.id, player);
     room.tokens.set(token, player);
@@ -213,20 +221,21 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 8_000, leadMs =
       return res.end(data);
     }
     if (req.method === 'POST' && url.pathname === '/api/rooms') {
-      const name = field((await readJson(req)).name, 24, 'Name');
+      const data = await readJson(req);
+      const name = field(data.name, 24, 'Name');
       if (rooms.size >= 100) fail('Too many active rooms. Try again shortly.', 503);
       let code;
       do {
         code = Array.from({ length: 5 }, () => alphabet[randomInt(alphabet.length)]).join('');
       } while (rooms.has(code));
       const room = {
-        code, phase: 'lobby', hostId: null, round: null, roundNumber: 0, timer: null,
+        code, revision: 0, phase: 'lobby', hostId: null, round: null, roundNumber: 0, timer: null,
         players: new Map(), tokens: new Map(), songs: new Map(), onlineIds: new Set(),
         sung: new Set(), usedSongs: new Set(), touchedAt: Date.now(),
       };
       for (const [title, artist] of starterSongs) addSong(room, title, artist);
       rooms.set(code, room);
-      return sendJson(res, 201, addPlayer(room, name));
+      return sendJson(res, 201, addPlayer(room, name, data.formats));
     }
     const match = /^\/api\/rooms\/([A-Z2-9]{5})\/(join|events|action|clip|session)$/.exec(url.pathname);
     if (!match) fail('Page not found.', 404);
@@ -234,16 +243,17 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 8_000, leadMs =
     const room = rooms.get(code);
     if (!room) fail('Room not found. Check the code and try again.', 404);
     if (req.method === 'POST' && route === 'join') {
-      const name = field((await readJson(req)).name, 24, 'Name');
+      const data = await readJson(req);
+      const name = field(data.name, 24, 'Name');
       if (room.phase !== 'lobby') fail('This game has already started.', 409);
-      return sendJson(res, 201, addPlayer(room, name));
+      return sendJson(res, 201, addPlayer(room, name, data.formats));
     }
 
     const token = route === 'events' ? url.searchParams.get('token')
       : /^Bearer ([a-f\d]{48})$/.exec(req.headers.authorization ?? '')?.[1];
     const player = room.tokens.get(token);
     if (!player) fail('Your room session has expired.', 401);
-    if (req.method === 'GET' && route === 'session') return sendJson(res, 200, { ok: true });
+    if (req.method === 'GET' && route === 'session') return sendJson(res, 200, snapshot(room, player));
     if (req.method === 'GET' && route === 'events') {
       res.writeHead(200, {
         'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no',
@@ -279,24 +289,51 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 8_000, leadMs =
     }
     if (route === 'clip' && req.method === 'POST') {
       const round = room.round;
+      if (round?.clip && round.singerId === player.id && url.searchParams.get('round') === round.id) {
+        req.resume();
+        return sendJson(res, 200, snapshot(room, player));
+      }
       const canUpload = () => room.phase === 'recording' && player.id === round.singerId
         && room.round === round && url.searchParams.get('round') === round.id;
       if (!canUpload()) fail('This recording turn has ended.', 409);
       const allowedTypes = ['audio/webm', 'audio/mp4', 'audio/ogg', 'audio/wav', 'audio/x-wav'];
       const mime = req.headers['content-type']?.split(';')[0].toLowerCase();
       if (!allowedTypes.includes(mime)) fail('This recording format is unsupported.', 415);
-      const clip = await readBody(req, maxClipBytes);
+      const chunked = url.searchParams.has('offset');
+      const offset = Number(url.searchParams.get('offset'));
+      const total = Number(url.searchParams.get('total'));
+      if (chunked && (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(total)
+        || total <= 0 || total > maxClipBytes || offset >= total)) fail('Invalid recording segment.');
+      let clip = await readBody(req, chunked ? 16384 : maxClipBytes);
       if (!clip.length) fail('The recording is empty. Try again.');
       if (!canUpload()) fail('This recording turn has ended.', 409);
-      const listeners = [...room.onlineIds].filter((id) => id !== player.id);
-      if (!listeners.length) fail('Wait for another player to reconnect before sharing.');
-      round.listeners = new Set(listeners);
+      if (chunked) {
+        if (offset + clip.length > total) fail('Invalid recording length.');
+        if (!round.upload && offset === 0) {
+          round.upload = { bytes: Buffer.alloc(total), received: 0, mime };
+        }
+        const upload = round.upload;
+        if (!upload || total !== upload.bytes.length || mime !== upload.mime || offset > upload.received) {
+          fail('Recording segment arrived out of order.', 409);
+        }
+        if (offset === upload.received) {
+          clip.copy(upload.bytes, offset);
+          upload.received += clip.length;
+        } else if (offset + clip.length > upload.received || !upload.bytes.subarray(offset, offset + clip.length).equals(clip)) {
+          fail('Recording segment does not match.', 409);
+        }
+        if (upload.received < total) return sendJson(res, 200, { received: upload.received });
+        clip = upload.bytes;
+      }
+      for (const id of room.onlineIds) if (id !== player.id) round.listeners.add(id);
+      if (!round.listeners.size) fail('Wait for another player to reconnect before sharing.');
       round.clip = clip;
+      round.upload = null;
       round.mime = mime;
       room.phase = 'preparing';
       room.timer = setTimeout(() => beginGuessing(room), prepareMs);
       broadcast(room);
-      return sendJson(res, 200, { ok: true });
+      return sendJson(res, 200, snapshot(room, player));
     }
     if (route !== 'action' || req.method !== 'POST') fail('Page not found.', 404);
     const data = await readJson(req);
@@ -335,6 +372,7 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 8_000, leadMs =
         }
         return sendJson(res, 200, { ok: true });
       case 'leave': {
+        if (room.phase === 'recording') round.listeners.delete(player.id);
         const stream = player.stream;
         player.stream = null;
         room.onlineIds.delete(player.id);
