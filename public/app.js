@@ -24,6 +24,60 @@ let playbackContext;
 let recording;
 let uploadInProgress = false;
 let guessInProgress = false;
+let heroNoteTransition = () => Promise.resolve();
+let welcomeSession;
+let backgroundMusic;
+let roundApplause;
+let gameMusicStopped = false;
+let soundVolume = 0.3;
+try {
+  const savedVolume = localStorage.getItem('humdat-volume');
+  if (savedVolume !== null && Number.isFinite(Number(savedVolume))) {
+    soundVolume = Math.max(0, Math.min(1, Number(savedVolume)));
+  }
+} catch { /* Use the default volume when storage is unavailable. */ }
+
+function setSoundVolume(value) {
+  soundVolume = Math.max(0, Math.min(1, Number(value)));
+  for (const audio of [backgroundMusic, roundApplause, media?.audio, ...document.querySelectorAll('audio')]) {
+    if (audio) audio.volume = soundVolume;
+  }
+  document.querySelectorAll('[data-volume-slider]').forEach((slider) => {
+    slider.value = String(soundVolume);
+  });
+  try { localStorage.setItem('humdat-volume', String(soundVolume)); } catch { /* Volume still applies for this page. */ }
+}
+
+function startBackgroundMusic() {
+  if (gameMusicStopped) return;
+  if (backgroundMusic && !backgroundMusic.paused) return;
+  if (!backgroundMusic) {
+    backgroundMusic = new Audio('/background-music.mp3');
+    backgroundMusic.loop = true;
+    backgroundMusic.volume = soundVolume;
+  }
+  backgroundMusic.play().catch(() => {});
+}
+
+function stopBackgroundMusic() {
+  if (!backgroundMusic) return;
+  backgroundMusic.pause();
+}
+
+function syncBackgroundMusic(phase) {
+  if (phase !== 'lobby') gameMusicStopped = true;
+  if (gameMusicStopped || phase === 'recording' || phase === 'preparing') stopBackgroundMusic();
+  else startBackgroundMusic();
+}
+
+function playRoundApplause() {
+  if (!roundApplause) {
+    roundApplause = new Audio('/round-applause.mp3');
+    roundApplause.volume = soundVolume;
+  }
+  roundApplause.currentTime = 0;
+  roundApplause.play().catch(() => {});
+}
 
 function tell(message, isError = false) {
   clearTimeout(toastTimeout);
@@ -31,6 +85,16 @@ function tell(message, isError = false) {
   status.classList.toggle('error', isError);
   status.hidden = false;
   toastTimeout = setTimeout(() => { status.hidden = true; }, 4500);
+}
+
+function revealNoteTransition() {
+  const overlay = document.querySelector('.note-transition-overlay');
+  if (!overlay) return;
+  const reveal = overlay.animate(
+    [{ opacity: 1 }, { opacity: 0 }],
+    { duration: 900, easing: 'ease-out', fill: 'forwards' },
+  );
+  reveal.finished.then(() => overlay.remove()).catch(() => {});
 }
 
 async function request(path, options) {
@@ -61,6 +125,8 @@ async function action(type, data = {}, current = session) {
 }
 
 function showHome() {
+  revealNoteTransition();
+  startBackgroundMusic();
   header.innerHTML = '';
   app.innerHTML = `
     <section class="hero">
@@ -69,7 +135,11 @@ function showHome() {
         <h1 class="hero-title">
           <span class="hero-title-line"><span data-note-anchor="hum">h</span>um da<span data-note-anchor="dat">t</span></span>
           <span class="hero-title-line"><span data-note-anchor="song">s</span>on<span data-note-anchor="g">g</span></span>
-          <img class="bouncing-note" src="/music-note.svg" alt="" aria-hidden="true">
+          <svg class="bouncing-note" viewBox="0 0 237 366" shape-rendering="crispEdges" aria-hidden="true">
+            <path fill="#454b4a" fill-rule="evenodd" d="M109 0h37v18h18v18h18v18h18v18h19v20h18v54h-37v-18h-18v-18h-18V92h-18v164h-18v18h-18v18H74v36H18v-18H0v-36h18v-18h19v-18h72z M37 256h37v18H55v18H37z"/>
+            <path fill="#171919" d="M146 55h18v18h18v18h18v18h18v18h19v19h-37v-18h-18v-18h-18V92h-18z"/>
+            <path fill="#171919" d="M110 274h36v54h-18v18H37v-18H18v-18h56v-18h36z"/>
+          </svg>
         </h1>
         <p class="lede">Hum songs your friends know. Guess what they’re humming before the clock runs out.</p>
       </div>
@@ -91,11 +161,69 @@ function showHome() {
   animateHeroNote(app.querySelector('.hero-title'));
 }
 
+function showWelcome() {
+  document.body.classList.add('welcome-active');
+  const screen = document.createElement('section');
+  screen.className = 'welcome-screen';
+  screen.setAttribute('aria-label', 'Welcome to humdat');
+  screen.innerHTML = `
+    <div class="welcome-content">
+      <div class="wordmark welcome-wordmark"><img class="brand-icon" src="/music-note.svg" alt=""> #humdat</div>
+      <button class="button primary welcome-start" type="button" data-welcome-start>Start</button>
+    </div>`;
+  const welcomeVolume = document.createElement('div');
+  welcomeVolume.className = 'volume-control welcome-volume';
+  welcomeVolume.setAttribute('role', 'group');
+  welcomeVolume.setAttribute('aria-label', 'Sound volume');
+  welcomeVolume.innerHTML = `<svg class="volume-icon" viewBox="0 0 100 100" aria-hidden="true" shape-rendering="crispEdges"><path fill="currentColor" d="M8 35h30V20h14v60H38V65H8z"/><path fill="currentColor" d="M66 30h10v10h10v20H76v10H66V60h10V40H66zM82 14h10v10h8v52h-8v10H82V76h8V24h-8z"/></svg><input class="volume-slider" data-volume-slider type="range" min="0" max="1" step="0.01" value="${soundVolume}" aria-label="All sound volume" title="All sound volume">`;
+  screen.append(welcomeVolume);
+  document.body.append(screen);
+  startBackgroundMusic();
+}
+
+async function beginWelcome() {
+  const screen = document.querySelector('.welcome-screen');
+  const brand = screen.querySelector('.welcome-wordmark');
+  const from = brand.getBoundingClientRect();
+  document.body.classList.remove('welcome-active');
+  const target = document.querySelector('.topbar .wordmark').getBoundingClientRect();
+  const deltaX = target.left - from.left;
+  const deltaY = target.top - from.top;
+  const scaleX = target.width / from.width;
+  const scaleY = target.height / from.height;
+  brand.style.position = 'fixed';
+  brand.style.left = `${from.left}px`;
+  brand.style.top = `${from.top}px`;
+  brand.style.margin = '0';
+  brand.style.transformOrigin = 'top left';
+  brand.style.zIndex = '1';
+  const clip = `inset(${target.top}px ${innerWidth - target.right}px ${innerHeight - target.bottom}px ${target.left}px round 12px)`;
+  const duration = matchMedia('(prefers-reduced-motion: reduce)').matches ? 300 : 900;
+  const easing = 'cubic-bezier(.76, 0, .24, 1)';
+  const pageMotion = screen.animate([
+    { clipPath: 'inset(0 0 0 0 round 0)' },
+    { clipPath: clip },
+  ], { duration, easing, fill: 'forwards' });
+  const logoMotion = brand.animate([
+    { transform: 'translate(0, 0) scale(1, 1)' },
+    { transform: `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})` },
+  ], { duration, easing, fill: 'forwards' });
+  await Promise.all([pageMotion.finished, logoMotion.finished]);
+  screen.remove();
+  if (welcomeSession) {
+    const nextSession = welcomeSession;
+    welcomeSession = undefined;
+    openRoom(nextSession);
+  }
+}
+
 function animateHeroNote(title) {
   const note = title.querySelector('.bouncing-note');
   const anchors = Object.fromEntries([...title.querySelectorAll('[data-note-anchor]')]
     .map((anchor) => [anchor.dataset.noteAnchor, anchor]));
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let activeMovement;
+  let isTransitioning = false;
   const getPosition = (name) => {
     const titleRect = title.getBoundingClientRect();
     const anchorRect = anchors[name].getBoundingClientRect();
@@ -118,9 +246,55 @@ function animateHeroNote(title) {
       return { transform: `translate(${x}px, ${y}px)`, offset: progress };
     });
     const animation = note.animate(keyframes, { duration, easing: 'linear' });
+    activeMovement = animation;
     await animation.finished.catch(() => {});
+    if (isTransitioning) return;
     note.style.transform = keyframes.at(-1).transform;
     animation.cancel();
+    activeMovement = undefined;
+  };
+
+  heroNoteTransition = async () => {
+    if (isTransitioning || !note.isConnected) return;
+    isTransitioning = true;
+    activeMovement?.pause();
+    const rect = note.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const headerBottom = document.querySelector('.topbar')?.getBoundingClientRect().bottom ?? 0;
+    const transitionTop = Math.max(0, headerBottom);
+    const centerY = rect.top + rect.height / 2 - transitionTop;
+    const transitionHeight = Math.max(0, innerHeight - transitionTop);
+    const radius = Math.ceil(Math.max(
+      Math.hypot(centerX, centerY),
+      Math.hypot(innerWidth - centerX, centerY),
+      Math.hypot(centerX, transitionHeight - centerY),
+      Math.hypot(innerWidth - centerX, transitionHeight - centerY),
+    ));
+    activeMovement?.cancel();
+    activeMovement = undefined;
+    const overlay = document.createElement('div');
+    overlay.className = 'note-transition-overlay';
+    overlay.style.top = `${transitionTop}px`;
+    overlay.setAttribute('aria-hidden', 'true');
+    note.classList.remove('bouncing-note');
+    note.classList.add('note-transition-note');
+    note.style.left = `${rect.left}px`;
+    note.style.top = `${rect.top - transitionTop}px`;
+    note.style.width = `${rect.width}px`;
+    note.style.height = `${rect.height}px`;
+    note.style.transform = 'none';
+    overlay.append(note);
+    document.body.append(overlay);
+    const duration = reducedMotion ? 450 : 900;
+    const wipe = overlay.animate([
+      { clipPath: `circle(0px at ${centerX}px ${centerY}px)` },
+      { clipPath: `circle(${radius}px at ${centerX}px ${centerY}px)` },
+    ], { duration, easing: 'ease-in', fill: 'forwards' });
+    const zoom = note.animate(
+      [{ transform: 'scale(1)' }, { transform: 'scale(36)' }],
+      { duration, easing: 'ease-in', fill: 'forwards' },
+    );
+    await Promise.all([wipe.finished, zoom.finished].map((finished) => finished.catch(() => {})));
   };
 
   placeAt('hum');
@@ -129,9 +303,9 @@ function animateHeroNote(title) {
     return;
   }
   (async () => {
-    while (title.isConnected) {
+    while (title.isConnected && !isTransitioning) {
       await moveBetween('hum', 'dat', 3200);
-      if (!title.isConnected) break;
+      if (!title.isConnected || isTransitioning) break;
       await moveBetween('dat', 'hum', 3200);
     }
   })();
@@ -147,6 +321,7 @@ function reset() {
   guessInProgress = false;
   session = undefined;
   state = undefined;
+  gameMusicStopped = false;
   renderedPhase = undefined;
   sessionStorage.removeItem(storageKey);
   history.replaceState(null, '', '/');
@@ -159,6 +334,7 @@ function connect(nextSession) {
   sessionStorage.setItem(storageKey, JSON.stringify(session));
   header.innerHTML = `<div class="header-actions">${button('Copy invite', 'invite')}${button('Leave room', 'leave', 'subtle')}</div>`;
   app.innerHTML = '<section class="panel"><p>Connecting to the room…</p></section>';
+  revealNoteTransition();
   events = new EventSource(roomPath(`events?token=${encodeURIComponent(session.token)}`));
   events.onmessage = ({ data }) => applyState(JSON.parse(data), nextSession);
   let syncing = false;
@@ -183,12 +359,59 @@ function connect(nextSession) {
 
 function applyState(next, nextSession) {
   if (session !== nextSession || (state && next.revision <= state.revision)) return;
+  const roundStarted = Boolean(state && ['lobby', 'between'].includes(state.phase)
+    && next.phase === 'recording' && state.round?.id !== next.round?.id);
   const sameRound = next.round?.id === state?.round?.id;
   if (!sameRound || next.phase === 'reveal') releaseMedia();
   if (state?.phase === 'recording' && (!sameRound || next.phase !== 'recording')) releaseRecording();
   state = next;
+  syncBackgroundMusic(next.phase);
   clockOffset = next.serverTime - Date.now();
   renderRoom();
+  if (roundStarted) {
+    playRoundApplause();
+    animateRoundIntro();
+  }
+}
+
+function animateRoundIntro() {
+  const dock = document.querySelector('.round-role-icon');
+  if (!dock || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const target = dock.getBoundingClientRect();
+  const scale = Math.min(3.2, (innerHeight * .82) / target.height, (innerWidth * .9) / target.width);
+  const largeWidth = target.width * scale;
+  const largeHeight = target.height * scale;
+  const middleX = (innerWidth - largeWidth) / 2;
+  const middleY = (innerHeight - largeHeight) / 2;
+  const startX = -largeWidth * .72;
+  const startY = middleY;
+  dock.classList.add('is-intro-hidden');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'round-intro-overlay';
+  overlay.setAttribute('aria-hidden', 'true');
+  const icon = document.createElement('img');
+  icon.className = 'round-intro-icon';
+  icon.src = dock.src;
+  icon.alt = '';
+  icon.style.left = `${startX}px`;
+  icon.style.top = `${startY}px`;
+  icon.style.width = `${largeWidth}px`;
+  icon.style.height = `${largeHeight}px`;
+  overlay.append(icon);
+  document.body.append(overlay);
+
+  const animation = icon.animate([
+    { left: `${startX}px`, top: `${startY}px`, width: `${largeWidth}px`, height: `${largeHeight}px`, offset: 0,
+      easing: 'cubic-bezier(.2,.7,.3,1)' },
+    { left: `${middleX}px`, top: `${middleY}px`, width: `${largeWidth}px`, height: `${largeHeight}px`, offset: .52,
+      easing: 'cubic-bezier(.2,.8,.2,1)' },
+    { left: `${target.left}px`, top: `${target.top}px`, width: `${target.width}px`, height: `${target.height}px`, offset: 1 },
+  ], { duration: 1750, fill: 'forwards' });
+  animation.finished.catch(() => {}).then(() => {
+    overlay.remove();
+    dock.classList.remove('is-intro-hidden');
+  });
 }
 
 function openRoom(nextSession) {
@@ -260,11 +483,6 @@ function poolView() {
   </section>
   <section class="panel stack">
     <div class="songs" id="songs" aria-label="Songs"></div>
-    <form class="add-form" id="add-song">
-      <div><label for="song-title">Song title</label><input id="song-title" name="title" maxlength="80" placeholder="Add a favourite" required></div>
-      <div><label for="song-artist">Artist</label><input id="song-artist" name="artist" maxlength="80" placeholder="Artist name" required></div>
-      <button class="button" type="submit">Add song</button>
-    </form>
     <div id="pool-footer" class="stack"></div>
   </section>`;
 }
@@ -344,7 +562,10 @@ function roundView() {
       ${state.totalRounds > 0 && state.remainingRounds ? '<p class="muted">Some rounds could not be played with the players still connected.</p>' : ''}
       ${you === host ? `<div>${button('Play again', 'rematch', 'primary')}</div>` : ''}`;
   }
-  return `<section class="panel stage stack">${heading}${contents}</section>`;
+  const roleArt = phase === 'recording' ? `<div class="round-role-art"><img class="round-role-icon" src="/${singer ? 'pixel-microphone.svg' : 'pixel-headphones.svg'}" alt="" aria-hidden="true"></div>` : '';
+  return `<section class="panel stage stack${phase === 'recording' ? ' recording-stage' : ''}">
+    <div class="round-stage-copy">${heading}${contents}</div>${roleArt}
+  </section>`;
 }
 
 function releaseMedia() {
@@ -388,6 +609,7 @@ async function loadClue(attempt = 1) {
     clue.url = URL.createObjectURL(blob);
     clue.audio = new Audio(clue.url);
     clue.audio.preload = 'auto';
+    clue.audio.volume = soundVolume;
     try {
       clue.buffer = await new OfflineAudioContext(1, 1, 24000).decodeAudioData(await blob.arrayBuffer());
     } catch {
@@ -711,7 +933,9 @@ document.addEventListener('submit', async (event) => {
       }).finally(() => {
         for (const element of form.querySelectorAll('button')) element.disabled = false;
       });
-      openRoom(await response.json());
+      const nextSession = await response.json();
+      await heroNoteTransition();
+      openRoom(nextSession);
     } else if (form.id === 'add-song') {
       await action('add-song', { title: data.get('title'), artist: data.get('artist') });
       form.reset();
@@ -738,6 +962,19 @@ document.addEventListener('submit', async (event) => {
 document.addEventListener('click', async (event) => {
   enableSound();
   const control = event.target.closest('[data-action]');
+  const welcomeStart = event.target.closest('[data-welcome-start]');
+  if (welcomeStart) {
+    welcomeStart.disabled = true;
+    startBackgroundMusic();
+    try {
+      await beginWelcome();
+    } catch (error) {
+      document.querySelector('.welcome-screen')?.remove();
+      document.body.classList.remove('welcome-active');
+      tell(error.message, true);
+    }
+    return;
+  }
   if (!control) return;
   const type = control.dataset.action;
   try {
@@ -781,6 +1018,10 @@ document.addEventListener('click', async (event) => {
       }
     } else {
       control.disabled = true;
+      if (type === 'start' && state.phase === 'lobby') {
+        gameMusicStopped = true;
+        stopBackgroundMusic();
+      }
       try {
         await action(type, { roundId: state.round?.id });
       } finally {
@@ -792,8 +1033,14 @@ document.addEventListener('click', async (event) => {
   }
 });
 
+document.addEventListener('input', (event) => {
+  if (event.target.matches('[data-volume-slider]')) setSoundVolume(event.target.value);
+});
+
 setInterval(tick, 100);
 let saved;
 try { saved = JSON.parse(sessionStorage.getItem(storageKey)); } catch { /* Start at the entry screen. */ }
-if (saved?.token && /^[A-Z2-9]{5}$/.test(saved.code) && (!inviteCode || inviteCode === saved.code)) openRoom(saved);
-else showHome();
+if (saved?.token && /^[A-Z2-9]{5}$/.test(saved.code) && (!inviteCode || inviteCode === saved.code)) welcomeSession = saved;
+showHome();
+showWelcome();
+setSoundVolume(soundVolume);
