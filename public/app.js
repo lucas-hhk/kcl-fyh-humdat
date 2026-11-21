@@ -263,7 +263,10 @@ function roundView() {
   } else if (phase === 'guessing') {
     contents = `<h2>${singer ? 'Your friends are guessing' : '#humdat'}</h2>
       <div class="timer" id="timer" role="timer"></div><div class="timer-track" aria-hidden="true"><div id="timer-bar"></div></div>
-      ${round.canGuess ? `<p id="clue-message" class="muted"></p>
+      ${round.canGuess ? `<div class="audio-controls">
+        <p id="clue-message" class="muted" role="status"></p>
+        ${button('Play clue', 'play-clue', 'subtle', true)}
+      </div>
       <form class="row" id="guess">
         <input id="guess-title" name="guess" aria-label="Song title" placeholder="Enter song title" maxlength="100" autocomplete="off" required disabled>
         <button class="button primary" disabled>Guess</button>
@@ -287,10 +290,18 @@ function releaseMedia() {
   media.controller.abort();
   media.source?.stop();
   media.source?.disconnect();
+  media.audio?.pause();
+  if (media.url) URL.revokeObjectURL(media.url);
   media = undefined;
 }
 
 function enableSound() {
+  try {
+    // On iOS, the default ambient category follows the phone's silent switch.
+    if (navigator.audioSession) navigator.audioSession.type = 'playback';
+  } catch {
+    // The native player remains available.
+  }
   try {
     playbackContext ??= new AudioContext();
     if (playbackContext.state !== 'running') playbackContext.resume().then(tick).catch(() => {});
@@ -310,13 +321,21 @@ async function loadClue(attempt = 1) {
     const response = await roomRequest(`clip?round=${roundId}`, {
       signal: clue.controller.signal,
     }, current);
-    const bytes = await response.arrayBuffer();
-    const buffer = await new OfflineAudioContext(1, 1, 24000).decodeAudioData(bytes);
+    const blob = await response.blob();
     if (media !== clue || session !== current) return;
-    clue.buffer = buffer;
+    clue.url = URL.createObjectURL(blob);
+    clue.audio = new Audio(clue.url);
+    clue.audio.preload = 'auto';
+    try {
+      clue.buffer = await new OfflineAudioContext(1, 1, 24000).decodeAudioData(await blob.arrayBuffer());
+    } catch {
+      // Some browsers can play the recording in a media element even when Web Audio cannot decode it.
+    }
+    if (media !== clue || session !== current) return;
+    clue.loaded = true;
     if (state.phase === 'preparing') await action('ready', { roundId }, current);
   } catch {
-    if (media === clue && !clue.buffer) {
+    if (media === clue && !clue.loaded) {
       clue.error = true;
       if (attempt < 3) setTimeout(() => {
         if (media !== clue) return;
@@ -326,6 +345,24 @@ async function loadClue(attempt = 1) {
     }
   } finally {
     clearTimeout(timeout);
+  }
+  tick();
+}
+
+async function playClue() {
+  const clue = media;
+  if (!clue?.loaded) return;
+  clue.useNative = true;
+  clue.source?.stop();
+  clue.source = null;
+  try {
+    clue.audio.currentTime = 0;
+    await clue.audio.play();
+    if (media === clue) clue.playError = false;
+  } catch {
+    if (media !== clue) return;
+    clue.playError = true;
+    clue.useNative = false;
   }
   tick();
 }
@@ -354,16 +391,22 @@ function tick() {
   correct.hidden = !round.correct;
   if (round.correct) correct.textContent = `Correct! You earned ${round.earned} points.`;
   const playing = playbackContext?.state === 'running';
-  const message = media?.error ? 'Could not load the clue.' : !media?.buffer ? 'Loading clue…'
-    : !playing ? 'Tap anywhere to restore sound.' : '';
-  document.querySelector('#clue-message').textContent = message;
-  if (remaining && playing && media?.buffer && !media.source) {
+  const message = media?.error ? 'Could not load the clue.' : !media?.loaded ? 'Loading clue…'
+    : media.playError ? 'Could not play the clue. Tap Play clue to try again.'
+    : !media.useNative && (!playing || !media.buffer) ? 'Tap Play clue to hear the recording.' : '';
+  const clueMessage = document.querySelector('#clue-message');
+  if (clueMessage.textContent !== message) clueMessage.textContent = message;
+  document.querySelector('[data-action="play-clue"]').disabled = !started || !remaining || !media?.loaded;
+  if (remaining && playing && media?.buffer && !media.source && !media.useNative) {
     const source = playbackContext.createBufferSource();
     source.buffer = media.buffer;
     source.connect(playbackContext.destination);
     media.source = source;
     source.onended = () => source.disconnect();
     source.start(playbackContext.currentTime + Math.max(0, round.startsAt - now) / 1000);
+  } else if (started && remaining && media?.loaded && !media.buffer && !media.nativeAttempted && !media.useNative) {
+    media.nativeAttempted = true;
+    playClue();
   }
 }
 
@@ -576,6 +619,8 @@ document.addEventListener('click', async (event) => {
       await startRecording();
     } else if (type === 'stop') {
       if (recording?.recorder?.state === 'recording') recording.recorder.stop();
+    } else if (type === 'play-clue') {
+      await playClue();
     } else if (type === 'retry-send') {
       await sendRecording();
     } else if (type === 'known') {
