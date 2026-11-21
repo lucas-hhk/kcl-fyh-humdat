@@ -241,31 +241,58 @@ function animateHeroNote(title) {
   const getPosition = (name) => {
     const titleRect = title.getBoundingClientRect();
     const anchorRect = anchors[name].getBoundingClientRect();
+    const noteRect = note.getBoundingClientRect();
     return {
-      x: anchorRect.left - titleRect.left + anchorRect.width / 2 - note.offsetWidth / 2,
-      y: anchorRect.top - titleRect.top - note.offsetHeight + 22,
+      x: anchorRect.left - titleRect.left + anchorRect.width / 2 - noteRect.width / 2,
+      y: anchorRect.top - titleRect.top - noteRect.height + 6,
     };
   };
   const placeAt = (name) => {
     const { x, y } = getPosition(name);
-    note.style.transform = `translate(${x}px, ${y}px)`;
+    note.style.left = `${x}px`;
+    note.style.top = `${y}px`;
+    note.style.transform = 'none';
   };
   const moveBetween = async (from, to, duration) => {
     const start = getPosition(from);
     const end = getPosition(to);
-    const keyframes = Array.from({ length: 9 }, (_, index) => {
-      const progress = index / 8;
-      const x = start.x + (end.x - start.x) * progress;
-      const y = start.y + (end.y - start.y) * progress - Math.sin(progress * Math.PI * 6) * 8;
-      return { transform: `translate(${x}px, ${y}px)`, offset: progress };
+    await new Promise((resolve) => {
+      let frameId;
+      let paused = false;
+      let cancelled = false;
+      const startedAt = performance.now();
+      const finish = () => {
+        if (cancelled) return;
+        cancelled = true;
+        if (frameId) cancelAnimationFrame(frameId);
+        if (activeMovement === movement) activeMovement = undefined;
+        resolve();
+      };
+      const movement = {
+        pause() {
+          if (cancelled || paused) return;
+          paused = true;
+          if (frameId) cancelAnimationFrame(frameId);
+        },
+        cancel: finish,
+      };
+      const draw = (now) => {
+        if (cancelled) return;
+        if (isTransitioning) return finish();
+        if (paused) return;
+        const progress = Math.min(1, (now - startedAt) / duration);
+        const x = start.x + (end.x - start.x) * progress;
+        const bounceHeight = reducedMotion ? 6 : 12;
+        const y = start.y + (end.y - start.y) * progress
+          - Math.abs(Math.sin(progress * Math.PI * 2)) * bounceHeight;
+        note.style.left = `${x}px`;
+        note.style.top = `${y}px`;
+        if (progress < 1) frameId = requestAnimationFrame(draw);
+        else finish();
+      };
+      activeMovement = movement;
+      frameId = requestAnimationFrame(draw);
     });
-    const animation = note.animate(keyframes, { duration, easing: 'linear' });
-    activeMovement = animation;
-    await animation.finished.catch(() => {});
-    if (isTransitioning) return;
-    note.style.transform = keyframes.at(-1).transform;
-    animation.cancel();
-    activeMovement = undefined;
   };
 
   heroNoteTransition = async () => {
@@ -311,16 +338,14 @@ function animateHeroNote(title) {
     await Promise.all([wipe.finished, zoom.finished].map((finished) => finished.catch(() => {})));
   };
 
+  const movementDuration = reducedMotion ? 3200 : 2100;
   placeAt('hum');
   note.style.opacity = 1;
-  if (reducedMotion) {
-    return;
-  }
   (async () => {
     while (title.isConnected && !isTransitioning) {
-      await moveBetween('hum', 'dat', 3200);
+      await moveBetween('hum', 'dat', movementDuration);
       if (!title.isConnected || isTransitioning) break;
-      await moveBetween('dat', 'hum', 3200);
+      await moveBetween('dat', 'hum', movementDuration);
     }
   })();
 }
@@ -642,13 +667,18 @@ function releaseMedia() {
   media = undefined;
 }
 
-function enableSound() {
+function setAudioSessionType(type) {
   try {
-    // On iOS, the default ambient category follows the phone's silent switch.
-    if (navigator.audioSession) navigator.audioSession.type = 'playback';
+    const audioSession = navigator.audioSession;
+    if (audioSession && audioSession.type !== type) audioSession.type = type;
   } catch {
-    // The native player remains available.
+    // Browsers without audio session control manage it automatically.
   }
+}
+
+function enableSound() {
+  // Playback bypasses silent mode on iOS but cannot be used during microphone capture.
+  if (!recording?.capturing) setAudioSessionType('playback');
   try {
     playbackContext ??= new AudioContext();
     if (playbackContext.state !== 'running') playbackContext.resume().then(tick).catch(() => {});
@@ -798,7 +828,14 @@ function releaseRecording() {
   clearTimeout(previous.timer);
   stopHumVisualizer(previous);
   if (previous.recorder?.state === 'recording') previous.recorder.stop();
-  previous.stream?.getTracks().forEach((track) => track.stop());
+  stopCapture(previous);
+}
+
+function stopCapture(clue) {
+  clue.stream?.getTracks().forEach((track) => track.stop());
+  clue.stream = undefined;
+  clue.capturing = false;
+  if (!recording?.capturing) setAudioSessionType('playback');
 }
 
 function stopHumVisualizer(clue) {
@@ -943,10 +980,11 @@ async function startRecording() {
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
     throw new Error('Recording needs a supported browser using HTTPS or localhost.');
   }
-  const next = {};
+  const next = { capturing: true };
   recording = next;
   updateRecording();
   try {
+    setAudioSessionType('play-and-record');
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     if (recording !== next) {
       stream.getTracks().forEach((track) => track.stop());
@@ -962,7 +1000,7 @@ async function startRecording() {
     recorder.ondataavailable = ({ data }) => { if (data.size) chunks.push(data); };
     recorder.onstop = async () => {
       stopHumVisualizer(next);
-      stream.getTracks().forEach((track) => track.stop());
+      stopCapture(next);
       clearTimeout(next.timer);
       if (recording !== next) return;
       next.sendingMessage = 'Preparing clue…';

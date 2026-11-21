@@ -16,9 +16,7 @@ const staticFiles = new Map([
   ['/music-note.svg', ['music-note.svg', 'image/svg+xml']],
   ['/round-applause.mp3', ['round-applause.mp3', 'audio/mpeg']],
   ['/wav.js', ['wav.js', 'text/javascript']],
-].map(([url, [file, type]]) => [
-  url, [readFileSync(new URL(`./public/${file}`, import.meta.url)), type],
-]));
+]);
 
 const starterSongs = [
   ['Dancing Queen', 'ABBA'],
@@ -398,7 +396,8 @@ export function createGameServer({ guessMs = 20_000, prepareMs = 40_000, leadMs 
   async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
     if (req.method === 'GET' && staticFiles.has(url.pathname)) {
-      const [data, type] = staticFiles.get(url.pathname);
+      const [file, type] = staticFiles.get(url.pathname);
+      const data = readFileSync(new URL(`./public/${file}`, import.meta.url));
       const charset = type.startsWith('text/') || type.includes('javascript') || type.endsWith('svg+xml') ? '; charset=utf-8' : '';
       res.writeHead(200, { 'Content-Type': `${type}${charset}`, 'Cache-Control': 'no-cache' });
       return res.end(data);
